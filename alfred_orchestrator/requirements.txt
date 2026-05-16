@@ -1,0 +1,12 @@
+openai
+opencv-python
+pydantic
+pyyaml
+sounddevice
+scipy
+numpy
+requests
+python-dotenv
+rich
+elevenlabs
+pytest

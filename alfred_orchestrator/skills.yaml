@@ -1,0 +1,128 @@
+# Skill catalog for the reBot Arm orchestrator.
+#
+# Top-level keys under `skills:` are *high-level skills*. Each is a named,
+# ordered composition of *subatomic skills* (the actual Python primitives
+# registered in orchestrator.py via @subatomic).
+#
+# The LLM picks ONE high-level skill per user prompt using `description` and
+# `when_to_use` as guidance. Skills may declare `params:` — these are the
+# arguments the LLM is allowed to fill in from the user prompt (e.g. a
+# color). Anything in `{curly_braces}` inside a step's `args` is substituted
+# from either the skill `params` or values produced by an earlier step's
+# `outputs:` clause (which writes into a shared execution context).
+#
+# Subatomic skill names below MUST exist in SUBATOMIC_SKILLS in
+# orchestrator.py. Pose names (for move_to_pose) must exist in
+# arm_poses.yaml.
+
+skills:
+
+  get_environment_info:
+    description: >
+      Look around and describe the current physical environment in natural
+      language: what objects are visible, where the robot is, what the scene
+      looks like.
+    when_to_use: >
+      User asks "what do you see", "where are you", "what's in the
+      environment", "describe your surroundings", "what's around you", or any
+      perception / scene-understanding question.
+    params: {}
+    steps:
+      - subatomic: speak
+        args: { text: "Let me have a look around." }
+      - subatomic: move_to_pose
+        args: { pose_name: overlook }
+      - subatomic: take_picture
+        outputs: image
+      - subatomic: query_vlm
+        args:
+          image: "{image}"
+          prompt: >
+            You are the vision system of a tabletop robot arm. Describe the
+            scene in 2-3 short sentences: list the objects you can see, their
+            approximate colors, and where they are on the table (left, right,
+            center, near, far). Keep it concise and conversational.
+        outputs: description
+      - subatomic: speak
+        args: { text: "{description}" }
+
+  pick_marker_by_color:
+    description: >
+      Pick up a colored marker from the table and drop it at the drop zone.
+      Supports red, yellow, blue, green, and white markers.
+    when_to_use: >
+      User asks the robot to pick up, grab, fetch, or move a marker of a
+      specific color. Extract the color into the `color` parameter (one of:
+      red, yellow, blue, green, white).
+    params:
+      color:
+        type: string
+        enum: [red, yellow, blue, green, white]
+        description: Color of the marker to pick.
+    steps:
+      - subatomic: speak
+        args: { text: "Picking the {color} marker." }
+      - subatomic: move_to_pose
+        args: { pose_name: "pre_pick_{color}" }
+      - subatomic: set_gripper
+        args: { value: -3.5 }   # open
+      - subatomic: move_to_pose
+        args: { pose_name: "pre_pick_{color}", duration: 1.5 }
+      - subatomic: set_gripper
+        args: { value: -0.4 }   # close on marker
+      - subatomic: move_to_pose
+        args: { pose_name: post_pick_marker }
+      - subatomic: move_to_pose
+        args: { pose_name: pre_place }
+      - subatomic: set_gripper
+        args: { value: -1.5 }   # release
+      - subatomic: speak
+        args: { text: "Done — {color} marker delivered." }
+
+  go_home:
+    description: >
+      Return the arm to a neutral safe pose above the table.
+    when_to_use: >
+      User says "go home", "reset", "stand by", "go to home pose", or wants
+      the arm in a neutral position.
+    params: {}
+    steps:
+      - subatomic: speak
+        args: { text: "Returning to home." }
+      - subatomic: home
+
+  describe_object:
+    description: >
+      Take a close-up look at the table and answer a free-form visual
+      question about a specific object (e.g. "what color is the cup", "how
+      many markers are there").
+    when_to_use: >
+      User asks a specific visual question about an object or count, rather
+      than a generic "what do you see".
+    params:
+      question:
+        type: string
+        description: The user's visual question, verbatim.
+    steps:
+      - subatomic: move_to_pose
+        args: { pose_name: overlook }
+      - subatomic: take_picture
+        outputs: image
+      - subatomic: query_vlm
+        args:
+          image: "{image}"
+          prompt: "{question} Answer in one short sentence."
+        outputs: answer
+      - subatomic: speak
+        args: { text: "{answer}" }
+
+  stop:
+    description: >
+      Stop motion immediately and hold the current pose.
+    when_to_use: >
+      User says "stop", "halt", "freeze", "wait" with urgency.
+    params: {}
+    steps:
+      - subatomic: halt
+      - subatomic: speak
+        args: { text: "Stopped." }

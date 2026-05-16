@@ -1,0 +1,42 @@
+skills:
+  listen:
+    type: digital
+    description: Capture audio from microphone.
+    inputs: []
+    outputs: [audio_file]
+    enabled: true
+
+  speech_to_text:
+    type: digital
+    description: Convert user speech to text using ElevenLabs.
+    inputs: [audio_file]
+    outputs: [text]
+    enabled: true
+
+  capture_wrist_camera_image:
+    type: physical
+    description: Capture an image from the wrist camera.
+    inputs: [camera_id]
+    outputs: [image_path]
+    enabled: true
+
+  describe_image_with_vlm:
+    type: vision
+    description: Describe objects and scene in an image.
+    inputs: [image_path, question]
+    outputs: [objects, uncertainties, spoken_summary]
+    enabled: true
+
+  speak:
+    type: digital
+    description: Speak text to the user using ElevenLabs TTS.
+    inputs: [text]
+    outputs: [audio_path, audio_played]
+    enabled: true
+
+  move_arm_noop:
+    type: physical
+    description: Placeholder arm motion skill that never moves hardware.
+    inputs: [pose_name]
+    outputs: [pose_name, moved]
+    enabled: true

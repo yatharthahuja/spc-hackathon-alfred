@@ -1,0 +1,1 @@
+Hi friend. This is Alfred testing text to speech from a file.

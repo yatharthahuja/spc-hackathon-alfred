@@ -1,0 +1,24 @@
+physical_skills_enabled: false
+
+arm_poses:
+  home:
+    description: Safe neutral pose.
+    enabled: false
+  desk_view:
+    description: Wrist camera points down at the desk.
+    enabled: false
+  front_view:
+    description: Wrist camera points forward.
+    enabled: false
+  top_view:
+    description: Wrist camera points downward from a higher angle.
+    enabled: false
+
+safety_rules:
+  - The LLM may only call registered skills.
+  - The LLM may not generate raw motor commands.
+  - Physical skills must be scripted and bounded.
+  - Arm motion must use predefined named poses.
+  - Real arm motion requires explicit enablement and an emergency stop plan.
+  - Do not order, purchase, or send external messages without explicit confirmation.
+  - Do not move toward people, faces, pets, or fragile objects unless a safe skill explicitly allows it.

@@ -1,0 +1,14 @@
+[project]
+name = "alfred-orchestrator"
+version = "0.1.0"
+description = "Hackathon MVP for Alfred voice, vision, and skill orchestration."
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
