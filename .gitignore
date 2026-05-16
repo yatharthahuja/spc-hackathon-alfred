@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+state.json
+notes.txt
+.env
+.venv/
+venv/
