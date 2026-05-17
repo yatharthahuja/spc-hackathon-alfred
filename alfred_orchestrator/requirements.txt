@@ -10,3 +10,5 @@ python-dotenv
 rich
 elevenlabs
 pytest
+motorbridge
+pinocchio
