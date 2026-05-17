@@ -614,6 +614,12 @@ _DETECTED_CAMERAS_LOCK = threading.Lock()
 _DETECTED_CAMERAS_CACHE: Optional[List[Dict[str, Any]]] = None
 
 
+def _known_camera_ids() -> Optional[set[int]]:
+    if _DETECTED_CAMERAS_CACHE is None:
+        return None
+    return {int(camera["camera_id"]) for camera in _DETECTED_CAMERAS_CACHE}
+
+
 def list_host_cameras(refresh: bool = False) -> List[Dict[str, Any]]:
     """Probe a few /dev/video* indices for working cameras (cached).
 
@@ -671,6 +677,10 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/stream":
             camera_id = self._int_query(query, "camera_id", 0)
+            known_camera_ids = _known_camera_ids()
+            if known_camera_ids is not None and camera_id not in known_camera_ids:
+                self.send_error(404, f"Camera {camera_id} is not available")
+                return
             self._stream_mjpeg(camera_id)
             return
         if path.startswith("/api/tts/") and path.endswith(".mp3"):
@@ -726,7 +736,9 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
             self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
             self.end_headers()
-        except Exception:
+        except Exception as exc:
+            if not is_stream_disconnect(exc):
+                print(f"[stream] camera {camera_id} could not start: {exc}", flush=True)
             return
         try:
             while True:
@@ -742,12 +754,17 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
                     self.wfile.write(jpeg)
                     self.wfile.write(b"\r\n")
                     self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError):
+                    return
+                except OSError as exc:
+                    if not is_stream_disconnect(exc):
+                        print(f"[stream] camera {camera_id} write error: {exc}", flush=True)
                     return
                 # ~10 fps preview; light enough for a phone-over-LAN connection.
                 time.sleep(0.1)
         except Exception as exc:
-            print(f"[stream] unexpected error on camera {camera_id}: {exc}", flush=True)
+            if not is_stream_disconnect(exc):
+                print(f"[stream] unexpected error on camera {camera_id}: {exc}", flush=True)
 
     def _send_html(self, html: str) -> None:
         body = html.encode("utf-8")
@@ -1043,6 +1060,25 @@ def image_data_url(image_path: Optional[Path]) -> Optional[str]:
             "data:image/jpeg;base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
         )
     return None
+
+
+def is_stream_disconnect(exc: BaseException) -> bool:
+    if isinstance(
+        exc,
+        (
+            BrokenPipeError,
+            ConnectionResetError,
+            ConnectionAbortedError,
+            ssl.SSLEOFError,
+        ),
+    ):
+        return True
+    message = str(exc).lower()
+    return (
+        "eof occurred in violation of protocol" in message
+        or "connection reset by peer" in message
+        or "broken pipe" in message
+    )
 
 
 def save_data_url(data_url: str, path_without_suffix: Path) -> Path:

@@ -12,6 +12,7 @@ if str(EXAMPLES_DIR) not in sys.path:
 
 from interactive_voice_loop import (  # noqa: E402
     image_data_url,
+    is_stream_disconnect,
     latest_successful_image_result,
     latest_successful_vlm_result,
     robot_move_payload,
@@ -65,3 +66,9 @@ def test_web_payload_helpers_include_read_notes_images(tmp_path):
 
     assert latest_successful_image_result(results).skill_name == "read_notes"
     assert latest_successful_vlm_result(results).skill_name == "read_notes"
+
+
+def test_stream_disconnect_helper_treats_browser_ssl_eof_as_normal():
+    assert is_stream_disconnect(BrokenPipeError("broken pipe")) is True
+    assert is_stream_disconnect(OSError("EOF occurred in violation of protocol (_ssl.c:2426)"))
+    assert is_stream_disconnect(RuntimeError("camera failed")) is False

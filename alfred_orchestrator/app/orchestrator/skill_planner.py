@@ -221,6 +221,10 @@ class CatalogSkillPlanner:
         return skills
 
     def _deterministic_sequence(self, user_text: str) -> SkillPlanSequence | None:
+        cleanup_then_notes = self._deterministic_cleanup_then_notes_sequence(user_text)
+        if cleanup_then_notes is not None:
+            return cleanup_then_notes
+
         clauses = self._split_compound_requests(user_text)
         if len(clauses) <= 1:
             choice = self._deterministic_choice(user_text)
@@ -243,6 +247,30 @@ class CatalogSkillPlanner:
             choices=choices,
             confidence=min(choice.confidence for choice in choices),
             reason="Detected an ordered compound request with multiple supported skills.",
+        )
+
+    def _deterministic_cleanup_then_notes_sequence(
+        self,
+        user_text: str,
+    ) -> SkillPlanSequence | None:
+        normalized = " ".join(user_text.lower().split())
+        cleanup_choice = self._deterministic_table_cleanup_choice(normalized)
+        notes_choice = self._deterministic_read_notes_choice(user_text, normalized)
+        if cleanup_choice is None or notes_choice is None:
+            return None
+        notes_choice = SkillPlanChoice(
+            skill_name=notes_choice.skill_name,
+            arguments={"user_text": user_text},
+            confidence=notes_choice.confidence,
+            reason=(
+                "Detected note reading after cleanup; preserving the full user request "
+                "so the note answer can be framed around the user's question."
+            ),
+        )
+        return SkillPlanSequence(
+            choices=[cleanup_choice, notes_choice],
+            confidence=min(cleanup_choice.confidence, notes_choice.confidence),
+            reason="Detected a cleanup request followed by contextual note reading.",
         )
 
     @staticmethod

@@ -102,6 +102,9 @@ skill_planner:
     User request: "do the biological experiments"
     JSON: {{"skill_calls": [{{"skill_name": "enzyme_experiments", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked Alfred to run the scripted biological experiment trajectory."}}], "confidence": 0.95, "reason": "The user requested the biological experiment skill."}}
 
+    User request: "Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy"
+    JSON: {{"skill_calls": [{{"skill_name": "pick_place_blue_marker", "arguments": {{}}, "confidence": 0.9, "reason": "First clean the table by removing the marker."}}, {{"skill_name": "read_notes", "arguments": {{"user_text": "Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy"}}, "confidence": 0.95, "reason": "Then read the notes and answer the user's shopping-list question from the note text."}}], "confidence": 0.9, "reason": "The user requested cleanup followed by contextual note reading."}}
+
     User request: "what tasks have you done so far?"
     JSON: {{"skill_name": "answer_task_history", "arguments": {{"question": "what tasks have you done so far?", "limit": null}}, "confidence": 0.95, "reason": "The user asked about Alfred's task history."}}
 
@@ -275,6 +278,21 @@ skill_planner:
         confidence: 0.95
         reason: The user requested the biological experiment skill.
     - input:
+        user_text: Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy
+      output:
+        skill_calls:
+          - skill_name: pick_place_blue_marker
+            arguments: {}
+            confidence: 0.9
+            reason: First clean the table by removing the marker.
+          - skill_name: read_notes
+            arguments:
+              user_text: Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy
+            confidence: 0.95
+            reason: Then read the notes and answer the user's shopping-list question from the note text.
+        confidence: 0.9
+        reason: The user requested cleanup followed by contextual note reading.
+    - input:
         user_text: clean up the table
       output:
         skill_name: pick_place_blue_marker
@@ -426,6 +444,9 @@ read_notes_vlm:
     - Return JSON only.
     - Read only text that is visible in the image.
     - Preserve line breaks or list structure when useful.
+    - Always put the direct transcription in extracted_text.
+    - If the user asks a specific question about the notes, answer that question in answer_text using only extracted_text.
+    - If the user simply asks to read notes, make answer_text say what the notes say.
     - If the note is unclear, say what parts are uncertain instead of guessing.
     - Keep answer_text concise and suitable for TTS.
   system_prompt: |
@@ -435,6 +456,13 @@ read_notes_vlm:
     "{user_text}"
 
     Inspect the wrist-camera image and transcribe the visible handwritten or printed notes.
+    First extract the exact visible note text into extracted_text.
+    Then answer the user's request naturally in answer_text.
+
+    Guidance:
+    - If the user says "read my notes", answer like: "I read your notes. Your notes say: ..."
+    - If the user asks what they need to buy, answer like: "I read your notes, and you need to buy: ..."
+    - If the user asks another question about the note, answer that question using only visible note text.
 
     Return JSON only:
     {{
@@ -450,8 +478,15 @@ read_notes_vlm:
         user_text: Read my notes
       output:
         extracted_text: Buy milk\nCall Sam
-        answer_text: Your note says, buy milk, and call Sam.
+        answer_text: I read your notes. Your notes say, buy milk, and call Sam.
         confidence: 0.85
+        uncertainties: []
+    - input:
+        user_text: read my notes, in my notes I have what I need to buy, so tell me what I need to buy
+      output:
+        extracted_text: apples\noranges\ncoffee
+        answer_text: I read your notes, and you need to buy apples, oranges, and coffee.
+        confidence: 0.9
         uncertainties: []
 
 task_history_response:

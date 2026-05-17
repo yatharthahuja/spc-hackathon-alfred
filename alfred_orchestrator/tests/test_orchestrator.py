@@ -220,6 +220,24 @@ def test_catalog_planner_maps_compound_skill_sequences(tmp_path):
     assert desk_plan.skill_calls[0].arguments["question"] == "what's on my desk"
 
 
+def test_catalog_planner_maps_cleanup_then_contextual_note_reading(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+    text = (
+        "HI Alfred, clean the table and after is clean read my notes, "
+        "in my notes I have what I need to buy, so tell me what I need to buy"
+    )
+    request = UserRequest(request_id="test-request", raw_text=text)
+    intent = orchestrator.classify_intent(request.raw_text)
+    plan = orchestrator.create_plan(request, intent)
+
+    assert plan.intent == Intent.RUN_SKILL
+    assert [call.skill_name for call in plan.skill_calls] == [
+        "pick_place_blue_marker",
+        "read_notes",
+    ]
+    assert plan.skill_calls[1].arguments["user_text"] == text
+
+
 def test_catalog_planner_maps_scene_questions_to_scene_qa(tmp_path):
     orchestrator = _orchestrator_with_catalog_planner(tmp_path)
 

@@ -95,3 +95,35 @@ def test_read_notes_moves_to_overlook_captures_image_and_reads_text(tmp_path):
     assert result.output["answer_text"] == "Your note says, buy milk, and call Sam."
     assert result.output["confidence"] == 0.88
     assert created_clients[0].responses.calls[0]["model"] == settings.openai_vision_model
+
+
+def test_read_notes_sends_contextual_note_question_to_vlm(tmp_path):
+    settings = replace(Settings.load(), openai_api_key="test-key")
+    prompts = PromptRegistry(settings.configs_dir / "prompts.yaml")
+    hardware = FakeHardwareContext()
+    created_clients: list[FakeOpenAIClient] = []
+
+    def client_factory(**kwargs: Any) -> FakeOpenAIClient:
+        client = FakeOpenAIClient(**kwargs)
+        created_clients.append(client)
+        return client
+
+    skill = ReadNotesSkill(
+        settings=settings,
+        prompt_registry=prompts,
+        run_dir=tmp_path,
+        hardware_context=hardware,
+        openai_client_factory=client_factory,
+    )
+    user_text = (
+        "read my notes, in my notes I have what I need to buy, "
+        "so tell me what I need to buy"
+    )
+
+    result = skill.run(user_text=user_text)
+
+    assert result.status == "success"
+    request_input = created_clients[0].responses.calls[0]["input"]
+    prompt_text = request_input[0]["content"][0]["text"]
+    assert user_text in prompt_text
+    assert "you need to buy" in prompt_text

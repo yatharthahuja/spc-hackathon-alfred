@@ -18,22 +18,29 @@ class CameraInfo:
 
 def detect_cameras(max_index: int = 10) -> List[CameraInfo]:
     available: List[CameraInfo] = []
-    for camera_id in range(max_index):
-        cap = cv2.VideoCapture(camera_id)
-        try:
-            if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
-                    available.append(
-                        CameraInfo(
-                            camera_id=camera_id,
-                            width=int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                            height=int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                            fps=float(cap.get(cv2.CAP_PROP_FPS)),
+    previous_log_level = cv2.getLogLevel() if hasattr(cv2, "getLogLevel") else None
+    if hasattr(cv2, "setLogLevel"):
+        cv2.setLogLevel(0)
+    try:
+        for camera_id in range(max_index):
+            cap = cv2.VideoCapture(camera_id)
+            try:
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    if ret:
+                        available.append(
+                            CameraInfo(
+                                camera_id=camera_id,
+                                width=int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                                height=int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                                fps=float(cap.get(cv2.CAP_PROP_FPS)),
+                            )
                         )
-                    )
-        finally:
-            cap.release()
+            finally:
+                cap.release()
+    finally:
+        if previous_log_level is not None and hasattr(cv2, "setLogLevel"):
+            cv2.setLogLevel(previous_log_level)
     return available
 
 
