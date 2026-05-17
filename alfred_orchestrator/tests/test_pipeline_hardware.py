@@ -67,7 +67,7 @@ def test_runtime_borrows_shared_hardware_context(tmp_path):
     assert hardware.close_calls == 0
 
 
-def test_runtime_records_non_history_tasks_and_skips_history_queries(tmp_path):
+def test_runtime_records_tasks_and_history_queries(tmp_path):
     TASK_HISTORY.clear()
     settings = Settings.load()
     runtime = AlfredRuntime(settings, run_dir=tmp_path, hardware_context=FakeHardwareContext())
@@ -89,10 +89,13 @@ def test_runtime_records_non_history_tasks_and_skips_history_queries(tmp_path):
         user_request,
         history_plan,
         [SkillResult(skill_name="answer_task_history", status="success", output={"answer_text": "Go home."})],
+        [],
+        [],
         CompletionResult(task_complete=True, reason="Answered history.", next_action="none"),
         FinalResponse(task_complete=True, answer_text="Go home.", confidence=0.9),
     )
 
-    assert TASK_HISTORY.count() == 1
+    assert TASK_HISTORY.count() == 2
+    assert TASK_HISTORY.recent(1)[0]["skill_names"] == ["answer_task_history"]
     runtime.close()
     TASK_HISTORY.clear()

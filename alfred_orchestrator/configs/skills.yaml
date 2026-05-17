@@ -36,7 +36,7 @@ skills:
 
   answer_task_history:
     type: digital
-    description: Answer questions about tasks Alfred has completed so far in this server session.
+    description: Answer questions about prior user questions, tasks, completion status, and skill results from this server session.
     inputs: [question, limit]
     outputs: [answer_text, task_count, selected_task_count, raw_response]
     examples:
@@ -144,6 +144,20 @@ skills:
       - do the biological experiments
       - run the biological experiment
       - perform the test tube experiment
+    enabled: true
+
+  ordering:
+    type: digital
+    description: Signal the external ordering system by writing 1 to /home/asjad/hackathon/drone/run when the user asks Alfred to buy, order, purchase, or get items for them.
+    inputs: [user_text]
+    outputs: [signal_file, signal_value, previous_value, user_text, message]
+    examples:
+      - can you please get something for me
+      - can you please get apple and oranges for me
+      - buy something for me
+      - order something for me
+      - please order apples and oranges
+      - purchase groceries for me
     enabled: true
 
   answer_scene_question:

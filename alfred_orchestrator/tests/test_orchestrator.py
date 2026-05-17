@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 from app.config import Settings
 from app.logs.event_logger import EventLogger
+from app.memory.session_memory import TASK_HISTORY
 from app.orchestrator.orchestrator import AlfredOrchestrator
 from app.orchestrator.prompt_registry import PromptRegistry
-from app.orchestrator.schemas import Intent, SkillResult, UserRequest
+from app.orchestrator.schemas import (
+    CompletionResult,
+    FinalResponse,
+    Intent,
+    OrchestratorPlan,
+    SkillCall,
+    SkillResult,
+    TaskStep,
+    UserRequest,
+)
 from app.orchestrator.skill_planner import CatalogSkillPlanner
 from app.orchestrator.task_registry import SkillCatalog
+from app.pipeline import AlfredRuntime
 
 
 def _orchestrator_with_catalog_planner(tmp_path):
@@ -179,6 +191,26 @@ def test_catalog_planner_maps_enzyme_experiment_variants(tmp_path):
         assert [call.skill_name for call in plan.skill_calls] == ["enzyme_experiments"]
 
 
+def test_catalog_planner_maps_ordering_requests(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    for text in [
+        "can you please get something for me",
+        "can you please get apple and oranges for me",
+        "buy something for me",
+        "order something for me",
+        "Order soup ingredients",
+        "please purchase groceries for me",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["ordering"]
+        assert plan.skill_calls[0].arguments["user_text"] == text
+
+
 def test_catalog_planner_maps_compound_skill_sequences(tmp_path):
     orchestrator = _orchestrator_with_catalog_planner(tmp_path)
 
@@ -285,7 +317,6 @@ def test_catalog_planner_maps_general_conversation_fallback(tmp_path):
         "what is your name?",
         "what skills do you have?",
         "what is the capital of the USA?",
-        "Order soup ingredients",
     ]:
         request = UserRequest(request_id="test-request", raw_text=text)
         intent = orchestrator.classify_intent(request.raw_text)
@@ -337,3 +368,91 @@ def test_final_answer_combines_multiple_success_messages(tmp_path):
 
     assert response.task_complete is True
     assert response.answer_text == "Moved to the overlook pose. Moved to the home pose."
+
+
+def test_task_memory_records_questions_completion_and_skill_results(tmp_path):
+    TASK_HISTORY.clear()
+    dummy_runtime = type(
+        "DummyRuntime",
+        (),
+        {
+            "logger": EventLogger(tmp_path, "test-request"),
+            "run_dir": tmp_path,
+            "session_memory_json_path": tmp_path / "session_memory.json",
+            "session_memory_jsonl_path": tmp_path / "session_memory.jsonl",
+        },
+    )()
+    request = UserRequest(request_id="test-request", raw_text="what was the last task?")
+    plan = OrchestratorPlan(
+        goal="what was the last task?",
+        intent=Intent.RUN_SKILL,
+        tasks=[
+            TaskStep(
+                task_id="t1",
+                agent="catalog_skill_planner",
+                required_skills=["answer_task_history"],
+            )
+        ],
+        skill_calls=[
+            SkillCall(
+                skill_name="answer_task_history",
+                arguments={"question": "what was the last task?", "limit": 1},
+            )
+        ],
+        completion_criteria=["Selected skill completed successfully"],
+    )
+    skill_results = [
+        SkillResult(
+            skill_name="answer_task_history",
+            status="success",
+            output={"answer_text": "The last task was to clean the table."},
+        )
+    ]
+    communication_results = [
+        SkillResult(
+            skill_name="speak",
+            status="success",
+            output={
+                "text": "The last task was to clean the table.",
+                "audio_path": str(tmp_path / "alfred_response.mp3"),
+                "audio_played": True,
+            },
+        )
+    ]
+    completion = CompletionResult(
+        task_complete=True,
+        reason="The planned skill completed successfully.",
+        next_action="none",
+    )
+    response = FinalResponse(
+        task_complete=True,
+        answer_text="The last task was to clean the table.",
+        confidence=0.9,
+    )
+
+    AlfredRuntime.record_task_history(
+        dummy_runtime,
+        request,
+        plan,
+        skill_results,
+        communication_results,
+        [],
+        completion,
+        response,
+    )
+
+    record = TASK_HISTORY.all()[-1]
+    assert record["question"] == "what was the last task?"
+    assert record["task_complete"] is True
+    assert record["skill_calls"][0]["skill_name"] == "answer_task_history"
+    assert record["skill_results"][0]["output"]["answer_text"] == (
+        "The last task was to clean the table."
+    )
+    assert record["communication_results"][0]["output"]["text"] == (
+        "The last task was to clean the table."
+    )
+    assert (tmp_path / "session_memory.json").exists()
+    assert (tmp_path / "session_memory.jsonl").exists()
+    persisted_records = json.loads((tmp_path / "session_memory.json").read_text(encoding="utf-8"))
+    assert persisted_records[-1]["all_results"][0]["skill_name"] == "speak"
+    TASK_HISTORY.clear()

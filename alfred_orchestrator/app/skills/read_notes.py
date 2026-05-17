@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from app.config import Settings
 from app.hardware.resources import HardwareContext
+from app.memory.session_memory import SessionMemory, TASK_HISTORY
 from app.orchestrator.json_utils import extract_json_object
 from app.orchestrator.prompt_registry import PromptRegistry
 from app.orchestrator.schemas import ReadNotesResult, SkillResult
@@ -22,12 +23,14 @@ class ReadNotesSkill(Skill):
         prompt_registry: PromptRegistry,
         run_dir: Path,
         hardware_context: HardwareContext,
+        task_history: SessionMemory = TASK_HISTORY,
         openai_client_factory: Callable[..., Any] | None = None,
     ):
         self.settings = settings
         self.prompt_registry = prompt_registry
         self.run_dir = run_dir
         self.hardware = hardware_context
+        self.task_history = task_history
         self.openai_client_factory = openai_client_factory
 
     def run(self, **kwargs: Any) -> SkillResult:
@@ -62,6 +65,7 @@ class ReadNotesSkill(Skill):
                 "read_notes_vlm",
                 {
                     "user_text": user_text,
+                    "task_history": self.task_history.all(),
                 },
             )
             print("[read_notes] Prompt sent to VLM:")

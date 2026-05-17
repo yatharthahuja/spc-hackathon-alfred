@@ -47,7 +47,8 @@ from collections import OrderedDict
 from app.config import Settings
 from app.hardware.resources import HardwareContext
 from app.interfaces.camera import detect_cameras
-from app.orchestrator.schemas import SkillCall, UserRequest
+from app.orchestrator.announcements import start_announcement
+from app.orchestrator.schemas import SkillCall, SkillResult, UserRequest
 from app.pipeline import AlfredRuntime
 from test_elevenlabs_api import load_env_value, synthesize_speech, transcribe_audio
 
@@ -73,6 +74,7 @@ IMAGE_VLM_SKILLS = {
 
 _TTS_LOCK = threading.Lock()
 _TTS_CACHE: "OrderedDict[str, bytes]" = OrderedDict()
+_TTS_EVENT_CACHE: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
 _TTS_MAX_ENTRIES = 32
 
 
@@ -82,11 +84,30 @@ def _store_tts(request_id: str, mp3: bytes) -> None:
         _TTS_CACHE.move_to_end(request_id)
         while len(_TTS_CACHE) > _TTS_MAX_ENTRIES:
             _TTS_CACHE.popitem(last=False)
+        while len(_TTS_EVENT_CACHE) > _TTS_MAX_ENTRIES:
+            _TTS_EVENT_CACHE.popitem(last=False)
 
 
 def _get_tts(request_id: str) -> Optional[bytes]:
     with _TTS_LOCK:
         return _TTS_CACHE.get(request_id)
+
+
+def _publish_tts_event(request_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    with _TTS_LOCK:
+        events = _TTS_EVENT_CACHE.setdefault(request_id, [])
+        published = {**event, "index": len(events)}
+        events.append(published)
+        _TTS_EVENT_CACHE.move_to_end(request_id)
+        while len(_TTS_EVENT_CACHE) > _TTS_MAX_ENTRIES:
+            _TTS_EVENT_CACHE.popitem(last=False)
+        return published
+
+
+def _get_tts_events(request_id: str, after_index: int = -1) -> List[Dict[str, Any]]:
+    with _TTS_LOCK:
+        events = _TTS_EVENT_CACHE.get(request_id, [])
+        return [event for event in events if int(event.get("index", -1)) > after_index]
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -190,6 +211,10 @@ HTML = r"""<!doctype html>
     let recorder = null;
     let chunks = [];
     let recordingStartedAt = 0;
+    let ttsPollTimer = null;
+    let latestTtsEventIndex = -1;
+    let ttsPlaybackQueue = Promise.resolve();
+    const playedTtsUrls = new Set();
 
     function log(message) {
       console.log(message);
@@ -200,6 +225,77 @@ HTML = r"""<!doctype html>
     function setStatus(message) {
       statusEl.textContent = message;
       log(message);
+    }
+
+    function newRequestId() {
+      if (window.crypto && window.crypto.randomUUID) {
+        return window.crypto.randomUUID();
+      }
+      return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    function waitForAudioToEnd() {
+      return new Promise(resolve => {
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          ttsPlayer.removeEventListener("ended", finish);
+          ttsPlayer.removeEventListener("error", finish);
+          resolve();
+        };
+        ttsPlayer.addEventListener("ended", finish, { once: true });
+        ttsPlayer.addEventListener("error", finish, { once: true });
+        setTimeout(finish, 30000);
+      });
+    }
+
+    function playTtsEvent(event) {
+      const url = event.tts_audio_url;
+      if (!url || playedTtsUrls.has(url)) return;
+      playedTtsUrls.add(url);
+      ttsPlaybackQueue = ttsPlaybackQueue.then(async () => {
+        ttsPlayer.src = url + "?_=" + Date.now();
+        ttsPlayer.load();
+        log("Alfred speech: " + url + " (" + (event.tts_audio_bytes || "?") + " bytes)");
+        try {
+          await ttsPlayer.play();
+          log("Alfred speech: playing.");
+          await waitForAudioToEnd();
+        } catch (e) {
+          log("Autoplay blocked — tap the play control above to hear Alfred. ("
+              + (e.message || e) + ")");
+        }
+      });
+    }
+
+    function startTtsPolling(requestId) {
+      stopTtsPolling();
+      latestTtsEventIndex = -1;
+      const poll = async () => {
+        try {
+          const res = await fetch(
+            `/api/tts-events?request_id=${encodeURIComponent(requestId)}&after=${latestTtsEventIndex}`
+          );
+          if (!res.ok) return;
+          const data = await res.json();
+          for (const event of data.events || []) {
+            latestTtsEventIndex = Math.max(latestTtsEventIndex, Number(event.index || 0));
+            playTtsEvent(event);
+          }
+        } catch (_) {
+          // Polling is best-effort; the final response still carries TTS metadata.
+        }
+      };
+      poll();
+      ttsPollTimer = setInterval(poll, 350);
+    }
+
+    function stopTtsPolling() {
+      if (ttsPollTimer !== null) {
+        clearInterval(ttsPollTimer);
+        ttsPollTimer = null;
+      }
     }
 
     function isMicAvailable() {
@@ -417,12 +513,17 @@ HTML = r"""<!doctype html>
           }
           const audioDataUrl = await blobToDataUrl(audioBlob);
           const cameraId = cameraSelect.value === "" ? null : Number(cameraSelect.value);
+          const requestId = newRequestId();
           stopHostPreview();
           setStatus("Sending audio to Alfred server...");
+          if (speakToggle.checked) {
+            startTtsPolling(requestId);
+          }
           const response = await fetch("/api/process", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              request_id: requestId,
               audio_data_url: audioDataUrl,
               camera_id: cameraId,
               speak: speakToggle.checked,
@@ -451,19 +552,14 @@ HTML = r"""<!doctype html>
           } else {
             capturedImage.removeAttribute("src");
           }
+          for (const event of payload.tts_audio_events || []) {
+            playTtsEvent(event);
+          }
           if (payload.tts_audio_url) {
-            // Cache-bust so the <audio> always refetches a fresh response.
-            ttsPlayer.src = payload.tts_audio_url + "?_=" + Date.now();
-            ttsPlayer.load();
-            log("Alfred speech: " + payload.tts_audio_url
-                + " (" + (payload.tts_audio_bytes || "?") + " bytes)");
-            try {
-              await ttsPlayer.play();
-              log("Alfred speech: playing.");
-            } catch (e) {
-              log("Autoplay blocked — tap the play control above to hear Alfred. ("
-                  + (e.message || e) + ")");
-            }
+            playTtsEvent({
+              tts_audio_url: payload.tts_audio_url,
+              tts_audio_bytes: payload.tts_audio_bytes,
+            });
           } else if (payload.tts_error) {
             log("TTS failed on server: " + payload.tts_error);
           } else if (payload.speak === false) {
@@ -474,6 +570,7 @@ HTML = r"""<!doctype html>
           log("Error: " + error.message);
           setStatus("Failed. See debug output.");
         } finally {
+          stopTtsPolling();
           startHostPreview();
           startBtn.disabled = false;
         }
@@ -697,6 +794,16 @@ class BrowserDemoHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(mp3)
             return
+        if path == "/api/tts-events":
+            request_id = query.get("request_id", [""])[0]
+            after_index = self._int_query(query, "after", -1)
+            self._send_json(
+                {
+                    "request_id": request_id,
+                    "events": _get_tts_events(request_id, after_index),
+                }
+            )
+            return
         self.send_error(404)
 
     def do_POST(self) -> None:
@@ -797,7 +904,8 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError("ELEVENLABS_API_KEY is missing")
 
     settings = Settings.load()
-    request_id = str(uuid4())
+    raw_request_id = str(payload.get("request_id") or "").strip()
+    request_id = raw_request_id or str(uuid4())
     run_dir = settings.new_run_dir("browser_demo")
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -857,6 +965,27 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
             f"the wrong microphone. Saved audio: {audio_path} ({audio_size} bytes). "
             f"ElevenLabs payload: {transcript_payload}"
         )
+    input_processing_results = [
+        SkillResult(
+            skill_name="browser_audio_upload",
+            status="success",
+            output={
+                "audio_path": str(audio_path),
+                "audio_bytes": audio_size,
+                "source": "browser",
+            },
+        ),
+        SkillResult(
+            skill_name="speech_to_text",
+            status="success",
+            output={
+                "text": transcript,
+                "raw_response": transcript_payload,
+                "model": stt_model,
+                "audio_path": str(audio_path),
+            },
+        ),
+    ]
 
     print_step("3", "Creating Alfred runtime")
     runtime = AlfredRuntime(settings, run_dir=run_dir, hardware_context=hardware)
@@ -885,6 +1014,9 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     print_step("6", "Executing skills")
     skill_results = []
+    communication_results: List[SkillResult] = []
+    tts_audio_events: List[Dict[str, Any]] = []
+    speak_requested = bool(payload.get("speak", True))
     outputs_by_skill: Dict[str, Dict[str, Any]] = {}
     for call in plan.skill_calls:
         call_arguments = dict(call.arguments)
@@ -899,6 +1031,23 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         print(f"Executing skill: {resolved_call.skill_name}")
         print_json_block("Resolved skill arguments", resolved_call.arguments)
+        if speak_requested:
+            announcement = start_announcement(transcript, resolved_call.skill_name)
+            if announcement:
+                print_step("6a", f"Speaking before {resolved_call.skill_name}")
+                speak_result, tts_event = synthesize_browser_tts(
+                    request_id=f"{request_id}-pre-{len(communication_results) + 1}",
+                    event_request_id=request_id,
+                    settings=settings,
+                    api_key=api_key,
+                    run_dir=run_dir,
+                    text=announcement,
+                    output_name=f"alfred_before_{resolved_call.skill_name}.mp3",
+                )
+                communication_results.append(speak_result)
+                if tts_event is not None:
+                    tts_audio_events.append(tts_event)
+                    time.sleep(0.5)
         result = runtime.executor.execute(resolved_call)
         skill_results.append(result)
         outputs_by_skill[result.skill_name] = result.output
@@ -954,44 +1103,44 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     print_json_block("Final response object", final_response.model_dump(mode="json"))
     print(f"Alfred answer: {final_response.answer_text}")
     print(f"Response confidence: {final_response.confidence}")
-    runtime.record_task_history(request, plan, skill_results, completion, final_response)
 
     tts_audio_url: Optional[str] = None
     tts_audio_bytes: Optional[int] = None
     tts_error: Optional[str] = None
-    speak_requested = bool(payload.get("speak", True))
     if speak_requested and final_response.answer_text.strip():
         # Inline TTS so we can stream the MP3 back to the browser (the phone
         # will play it). We do NOT route through the `speak` skill because
         # that goes through app/interfaces/audio.py → aplay on Ubuntu, which
         # cannot decode MP3 and would either silently fail or play noise.
         print_step("9", "Synthesizing TTS for phone playback")
-        try:
-            mp3_path = run_dir / "alfred_response.mp3"
-            print(f"Text sent to TTS: {final_response.answer_text}")
-            print(f"TTS voice id: {settings.elevenlabs_voice_id}")
-            print(f"TTS model: {settings.elevenlabs_tts_model}")
-            print(f"TTS output format: {settings.elevenlabs_output_format}")
-            synthesize_speech(
-                api_key=api_key,
-                voice_id=settings.elevenlabs_voice_id,
-                model_id=settings.elevenlabs_tts_model,
-                output_format=settings.elevenlabs_output_format,
-                text=final_response.answer_text,
-                output_path=mp3_path,
-                timeout=120,
-            )
-            mp3_bytes = mp3_path.read_bytes()
-            _store_tts(request_id, mp3_bytes)
-            tts_audio_url = f"/api/tts/{request_id}.mp3"
-            tts_audio_bytes = len(mp3_bytes)
-            print(f"TTS bytes: {tts_audio_bytes} → served at {tts_audio_url}")
-            print(f"TTS audio file: {mp3_path}")
-        except Exception as exc:
-            tts_error = str(exc)
-            print(f"TTS failed: {exc}")
+        speak_result, tts_event = synthesize_browser_tts(
+            request_id=request_id,
+            event_request_id=request_id,
+            settings=settings,
+            api_key=api_key,
+            run_dir=run_dir,
+            text=final_response.answer_text,
+            output_name="alfred_response.mp3",
+        )
+        communication_results.append(speak_result)
+        if tts_event is not None:
+            tts_audio_events.append(tts_event)
+            tts_audio_url = str(tts_event["tts_audio_url"])
+            tts_audio_bytes = int(tts_event["tts_audio_bytes"])
+        if speak_result.status == "error":
+            tts_error = speak_result.error
     else:
         print_step("9", "Skipping text-to-speech")
+
+    runtime.record_task_history(
+        request,
+        plan,
+        skill_results,
+        communication_results,
+        input_processing_results,
+        completion,
+        final_response,
+    )
 
     print_step("Done", "Browser demo request complete")
     return {
@@ -1008,6 +1157,11 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         "robot_move": robot_move,
         "vlm_output": vlm_output,
         "skill_results": [result.model_dump(mode="json") for result in skill_results],
+        "communication_results": [
+            result.model_dump(mode="json")
+            for result in communication_results
+        ],
+        "tts_audio_events": tts_audio_events,
         "captured_image_data_url": captured_image_data_url,
         "run_dir": str(run_dir),
         "speak": speak_requested,
@@ -1015,6 +1169,71 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         "tts_audio_bytes": tts_audio_bytes,
         "tts_error": tts_error,
     }
+
+
+def synthesize_browser_tts(
+    *,
+    request_id: str,
+    settings: Settings,
+    api_key: str,
+    run_dir: Path,
+    text: str,
+    output_name: str,
+    event_request_id: Optional[str] = None,
+) -> Tuple[SkillResult, Optional[Dict[str, Any]]]:
+    mp3_path = run_dir / output_name
+    try:
+        print(f"Text sent to TTS: {text}")
+        print(f"TTS voice id: {settings.elevenlabs_voice_id}")
+        print(f"TTS model: {settings.elevenlabs_tts_model}")
+        print(f"TTS output format: {settings.elevenlabs_output_format}")
+        synthesize_speech(
+            api_key=api_key,
+            voice_id=settings.elevenlabs_voice_id,
+            model_id=settings.elevenlabs_tts_model,
+            output_format=settings.elevenlabs_output_format,
+            text=text,
+            output_path=mp3_path,
+            timeout=120,
+        )
+        mp3_bytes = mp3_path.read_bytes()
+        _store_tts(request_id, mp3_bytes)
+        tts_audio_url = f"/api/tts/{request_id}.mp3"
+        print(f"TTS bytes: {len(mp3_bytes)} → served at {tts_audio_url}")
+        print(f"TTS audio file: {mp3_path}")
+        output = {
+            "text": text,
+            "audio_path": str(mp3_path),
+            "tts_audio_url": tts_audio_url,
+            "tts_audio_bytes": len(mp3_bytes),
+            "audio_played": False,
+            "playback_target": "browser",
+        }
+        published_output = (
+            _publish_tts_event(event_request_id, output)
+            if event_request_id
+            else output
+        )
+        return (
+            SkillResult(skill_name="speak", status="success", output=published_output),
+            published_output,
+        )
+    except Exception as exc:
+        print(f"TTS failed: {exc}")
+        return (
+            SkillResult(
+                skill_name="speak",
+                status="error",
+                error=str(exc),
+                output={
+                    "text": text,
+                    "audio_path": str(mp3_path),
+                    "audio_played": False,
+                    "playback_target": "browser",
+                },
+            ),
+            None,
+        )
 
 
 def latest_successful_image_result(skill_results: List[Any]) -> Optional[Any]:
@@ -1330,13 +1549,22 @@ def run_terminal_only(args: argparse.Namespace) -> int:
         skill_results = runtime.executor.execute_plan(plan)
         completion = runtime.orchestrator.evaluate_completion(request, skill_results)
         response = runtime.orchestrator.generate_final_answer(request, skill_results)
-        runtime.record_task_history(request, plan, skill_results, completion, response)
-        print(f"Alfred answer: {response.answer_text}")
-
+        communication_results = []
         if not args.no_speak:
-            runtime.executor.execute(
+            speak_result = runtime.executor.execute(
                 SkillCall(skill_name="speak", arguments={"text": response.answer_text})
             )
+            communication_results.append(speak_result)
+        runtime.record_task_history(
+            request,
+            plan,
+            skill_results,
+            communication_results,
+            [],
+            completion,
+            response,
+        )
+        print(f"Alfred answer: {response.answer_text}")
         return 0 if response.task_complete else 1
 
 

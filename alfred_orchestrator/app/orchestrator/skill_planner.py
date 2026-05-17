@@ -225,6 +225,7 @@ class CatalogSkillPlanner:
         if cleanup_then_notes is not None:
             return cleanup_then_notes
 
+        normalized = " ".join(user_text.lower().split())
         clauses = self._split_compound_requests(user_text)
         if len(clauses) <= 1:
             choice = self._deterministic_choice(user_text)
@@ -240,6 +241,13 @@ class CatalogSkillPlanner:
         for clause in clauses:
             choice = self._deterministic_choice(clause)
             if choice is None or choice.is_unknown:
+                ordering_choice = self._deterministic_ordering_choice(user_text, normalized)
+                if ordering_choice is not None:
+                    return SkillPlanSequence(
+                        choices=[ordering_choice],
+                        confidence=ordering_choice.confidence,
+                        reason=ordering_choice.reason,
+                    )
                 return None
             choices.append(choice)
 
@@ -333,6 +341,10 @@ class CatalogSkillPlanner:
         if cleanup_choice is not None:
             return cleanup_choice
 
+        ordering_choice = self._deterministic_ordering_choice(user_text, normalized)
+        if ordering_choice is not None:
+            return ordering_choice
+
         marker_object_terms = ("marker", "sharpie", "sharpy")
         mentions_marker_object = any(term in normalized for term in marker_object_terms)
         if not mentions_marker_object:
@@ -387,6 +399,39 @@ class CatalogSkillPlanner:
                 reason="Detected a table cleanup request; using the blue marker pick-and-place sequence.",
             )
         return None
+
+    def _deterministic_ordering_choice(
+        self,
+        user_text: str,
+        normalized: str,
+    ) -> SkillPlanChoice | None:
+        if not self._can_use("ordering"):
+            return None
+
+        robot_object_terms = ("marker", "sharpie", "sharpy")
+        if any(term in normalized for term in robot_object_terms):
+            return None
+
+        note_terms = ("note", "notes", "paper", "written", "writing", "text")
+        if any(term in normalized for term in note_terms):
+            return None
+
+        ordering_patterns = (
+            r"\b(?:can|could|would)\s+you(?:\s+please)?\s+(?:buy|order|purchase|get)\b",
+            r"\bplease\s+(?:buy|order|purchase|get)\b",
+            r"^(?:buy|order|purchase)\b",
+            r"\b(?:buy|order|purchase|get)\b.+\bfor me\b",
+            r"\bi\s+want\s+you\s+to\s+(?:buy|order|purchase|get)\b",
+        )
+        if not any(re.search(pattern, normalized) for pattern in ordering_patterns):
+            return None
+
+        return SkillPlanChoice(
+            skill_name="ordering",
+            arguments={"user_text": user_text},
+            confidence=0.95,
+            reason="Detected a request to buy, order, purchase, or get items for the user.",
+        )
 
     def _deterministic_enzyme_experiment_choice(self, normalized: str) -> SkillPlanChoice | None:
         experiment_words = ("experiment", "experiments", "lab", "protocol")

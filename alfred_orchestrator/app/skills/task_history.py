@@ -33,7 +33,8 @@ class AnswerTaskHistorySkill(Skill):
                 "task_history_response",
                 {
                     "user_text": question,
-                    "task_history": selected_tasks,
+                    "task_history": all_tasks,
+                    "selected_task_history": selected_tasks,
                     "selected_task_count": len(selected_tasks),
                     "total_task_count": len(all_tasks),
                 },

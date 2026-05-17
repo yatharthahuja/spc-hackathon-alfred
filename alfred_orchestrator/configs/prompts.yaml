@@ -102,6 +102,15 @@ skill_planner:
     User request: "do the biological experiments"
     JSON: {{"skill_calls": [{{"skill_name": "enzyme_experiments", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked Alfred to run the scripted biological experiment trajectory."}}], "confidence": 0.95, "reason": "The user requested the biological experiment skill."}}
 
+    User request: "can you please get apple and oranges for me"
+    JSON: {{"skill_calls": [{{"skill_name": "ordering", "arguments": {{"user_text": "can you please get apple and oranges for me"}}, "confidence": 0.95, "reason": "The user asked Alfred to get items for them, so signal the ordering system."}}], "confidence": 0.95, "reason": "The user requested an ordering action."}}
+
+    User request: "buy something for me"
+    JSON: {{"skill_calls": [{{"skill_name": "ordering", "arguments": {{"user_text": "buy something for me"}}, "confidence": 0.95, "reason": "The user asked Alfred to buy something, so signal the ordering system."}}], "confidence": 0.95, "reason": "The user requested an ordering action."}}
+
+    User request: "order something for me"
+    JSON: {{"skill_calls": [{{"skill_name": "ordering", "arguments": {{"user_text": "order something for me"}}, "confidence": 0.95, "reason": "The user asked Alfred to order something, so signal the ordering system."}}], "confidence": 0.95, "reason": "The user requested an ordering action."}}
+
     User request: "Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy"
     JSON: {{"skill_calls": [{{"skill_name": "pick_place_blue_marker", "arguments": {{}}, "confidence": 0.9, "reason": "First clean the table by removing the marker."}}, {{"skill_name": "read_notes", "arguments": {{"user_text": "Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy"}}, "confidence": 0.95, "reason": "Then read the notes and answer the user's shopping-list question from the note text."}}], "confidence": 0.9, "reason": "The user requested cleanup followed by contextual note reading."}}
 
@@ -278,6 +287,39 @@ skill_planner:
         confidence: 0.95
         reason: The user requested the biological experiment skill.
     - input:
+        user_text: can you please get apple and oranges for me
+      output:
+        skill_calls:
+          - skill_name: ordering
+            arguments:
+              user_text: can you please get apple and oranges for me
+            confidence: 0.95
+            reason: The user asked Alfred to get items for them, so signal the ordering system.
+        confidence: 0.95
+        reason: The user requested an ordering action.
+    - input:
+        user_text: buy something for me
+      output:
+        skill_calls:
+          - skill_name: ordering
+            arguments:
+              user_text: buy something for me
+            confidence: 0.95
+            reason: The user asked Alfred to buy something, so signal the ordering system.
+        confidence: 0.95
+        reason: The user requested an ordering action.
+    - input:
+        user_text: order something for me
+      output:
+        skill_calls:
+          - skill_name: ordering
+            arguments:
+              user_text: order something for me
+            confidence: 0.95
+            reason: The user asked Alfred to order something, so signal the ordering system.
+        confidence: 0.95
+        reason: The user requested an ordering action.
+    - input:
         user_text: Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy
       output:
         skill_calls:
@@ -337,6 +379,7 @@ desk_vlm:
   context_fields:
     - user_text
     - question
+    - task_history
   output_format:
     type: json
     schema:
@@ -356,6 +399,12 @@ desk_vlm:
 
     Vision question:
     "{question}"
+
+    Full session memory:
+    {task_history}
+
+    Use the session memory only when it is relevant to the user's question or wording.
+    For visual facts, rely on the current image. Do not invent objects from memory.
 
     Return JSON only:
     {{
@@ -380,6 +429,7 @@ scene_qa_vlm:
   context_fields:
     - user_text
     - question
+    - task_history
   output_format:
     type: json
     schema:
@@ -400,6 +450,12 @@ scene_qa_vlm:
 
     Scene question:
     "{question}"
+
+    Full session memory:
+    {task_history}
+
+    Use session memory only when it is relevant to the user's question or references a prior task.
+    Answer visual questions from the current image, not from memory.
 
     Return JSON only:
     {{
@@ -433,6 +489,7 @@ read_notes_vlm:
   task: Read handwritten or printed notes from a wrist-camera image.
   context_fields:
     - user_text
+    - task_history
   output_format:
     type: json
     schema:
@@ -455,9 +512,14 @@ read_notes_vlm:
     User asked:
     "{user_text}"
 
+    Full session memory:
+    {task_history}
+
     Inspect the wrist-camera image and transcribe the visible handwritten or printed notes.
     First extract the exact visible note text into extracted_text.
     Then answer the user's request naturally in answer_text.
+    Use session memory only when it helps interpret a relevant reference in the user's request.
+    Do not let session memory change extracted_text; extracted_text must come only from visible note text.
 
     Guidance:
     - If the user says "read my notes", answer like: "I read your notes. Your notes say: ..."
@@ -491,10 +553,11 @@ read_notes_vlm:
 
 task_history_response:
   role: Alfred task history assistant
-  task: Answer a user question about Alfred's completed task history.
+  task: Answer a user question about Alfred's session history.
   context_fields:
     - user_text
     - task_history
+    - selected_task_history
     - selected_task_count
     - total_task_count
   output_format:
@@ -505,22 +568,30 @@ task_history_response:
   constraints:
     - Return JSON only.
     - Answer only from the task_history records.
+    - Use only the task history records relevant to the user's question.
     - Be concise and suitable for TTS.
-    - If there is no task history, say that no tasks have been completed yet.
+    - If there is no session history, say that no questions or tasks have been recorded yet.
   system_prompt: |
-    You are Alfred, a robot assistant summarizing your completed task history.
+    You are Alfred, a robot assistant summarizing your session history.
 
     User asked:
     "{user_text}"
 
-    Total completed task records available:
+    Total session memory records available:
     {total_task_count}
 
-    Task records included for this answer:
+    Selected records included for this answer:
     {selected_task_count}
 
-    Task history:
+    Selected task history:
+    {selected_task_history}
+
+    Full session memory:
     {task_history}
+
+    The memory records may include prior questions, selected skills, skill results, completion status, and final answer text.
+    Prefer the selected records for limit-based questions such as "last task".
+    Use the full session memory only when it is relevant to the user's history question; do not invent tasks or results.
 
     Return JSON only:
     {{
@@ -573,10 +644,12 @@ general_conversation:
     Enabled skills:
     {available_skills}
 
-    Task history:
+    Full session memory:
     {task_history}
 
     Answer the user naturally. You may answer general knowledge questions, casual conversation, questions about your name/personality, and questions about your capabilities.
+    Use session memory only when it is relevant to the user's question or references prior questions, tasks, completions, or results.
+    Do not force memory into unrelated answers.
 
     Return JSON only:
     {{

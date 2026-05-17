@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from app.execution.safety import SafetyGate
 from app.execution.skill_router import SkillRouter
@@ -15,7 +15,11 @@ class SkillExecutor:
         self.safety_gate = safety_gate
         self.logger = logger
 
-    def execute_plan(self, plan: OrchestratorPlan) -> List[SkillResult]:
+    def execute_plan(
+        self,
+        plan: OrchestratorPlan,
+        before_skill: Callable[[SkillCall], None] | None = None,
+    ) -> List[SkillResult]:
         results: List[SkillResult] = []
         outputs_by_skill: Dict[str, Dict[str, Any]] = {}
         print("[executor] Starting plan execution")
@@ -28,6 +32,11 @@ class SkillExecutor:
             )
             print(f"[executor] Resolved skill call: {resolved_call.skill_name}")
             print(f"[executor] Resolved arguments: {resolved_call.arguments}")
+            if before_skill is not None:
+                try:
+                    before_skill(resolved_call)
+                except Exception as exc:
+                    print(f"[executor] before_skill callback failed: {exc}")
             result = self.execute(resolved_call)
             results.append(result)
             outputs_by_skill[result.skill_name] = result.output

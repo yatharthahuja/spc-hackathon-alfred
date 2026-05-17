@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 from uuid import uuid4
 
 from app.config import Settings
@@ -12,6 +13,7 @@ from app.execution.skill_router import SkillRouter
 from app.hardware.resources import HardwareContext
 from app.logs.event_logger import EventLogger
 from app.memory.session_memory import TASK_HISTORY
+from app.orchestrator.announcements import completion_announcement, start_announcement
 from app.orchestrator.orchestrator import AlfredOrchestrator
 from app.orchestrator.prompt_registry import PromptRegistry
 from app.orchestrator.schemas import (
@@ -36,6 +38,7 @@ from app.skills.marker import (
     PickBlueMarkerSkill,
     PickPlaceBlueMarkerSkill,
 )
+from app.skills.ordering import OrderingSkill
 from app.skills.read_notes import ReadNotesSkill
 from app.skills.scene_qa import AnswerSceneQuestionSkill
 from app.skills.speech_to_text import SpeechToTextSkill
@@ -84,6 +87,8 @@ class AlfredRuntime:
             camera_id=settings.camera_id,
             skill_planner=CatalogSkillPlanner(self.settings, self.catalog, self.prompts),
         )
+        self.session_memory_json_path = self.run_dir / "session_memory.json"
+        self.session_memory_jsonl_path = self.run_dir / "session_memory.jsonl"
 
     def close(self) -> None:
         if self._owns_hardware:
@@ -100,6 +105,7 @@ class AlfredRuntime:
         text: str,
         input_type: str = "text",
         speak: bool = False,
+        input_processing_results: Optional[List[SkillResult]] = None,
     ) -> PipelineResult:
         request = UserRequest(
             request_id=self.request_id,
@@ -115,24 +121,66 @@ class AlfredRuntime:
 
         intent_result = self.orchestrator.classify_intent(request.raw_text)
         plan = self.orchestrator.create_plan(request, intent_result)
-        skill_results = self.executor.execute_plan(plan)
+        communication_results: List[SkillResult] = []
+        before_skill = (
+            self._before_skill_speaker(request.raw_text, communication_results)
+            if speak
+            else None
+        )
+        skill_results = self.executor.execute_plan(plan, before_skill=before_skill)
         completion = self.orchestrator.evaluate_completion(request, skill_results)
         response = self.orchestrator.generate_final_answer(request, skill_results)
-        self.record_task_history(request, plan, skill_results, completion, response)
 
         if speak:
-            speak_result = self.executor.execute(
-                SkillCall(skill_name="speak", arguments={"text": response.answer_text})
+            spoken_completion = completion_announcement(
+                request.raw_text,
+                [call.skill_name for call in plan.skill_calls],
+                response.answer_text,
+                any(result.status == "error" for result in skill_results),
             )
-            skill_results.append(speak_result)
+            if spoken_completion:
+                speak_result = self._speak_text(spoken_completion)
+                communication_results.append(speak_result)
+
+        self.record_task_history(
+            request,
+            plan,
+            skill_results,
+            communication_results,
+            input_processing_results or [],
+            completion,
+            response,
+        )
 
         return PipelineResult(
             request=request,
             response=response,
             completion=completion,
-            skill_results=skill_results,
+            skill_results=[
+                *(input_processing_results or []),
+                *communication_results,
+                *skill_results,
+            ],
             run_dir=self.run_dir,
         )
+
+    def _before_skill_speaker(
+        self,
+        user_text: str,
+        communication_results: List[SkillResult],
+    ) -> Callable[[SkillCall], None]:
+        def before_skill(call: SkillCall) -> None:
+            announcement = start_announcement(user_text, call.skill_name)
+            if announcement:
+                communication_results.append(self._speak_text(announcement))
+
+        return before_skill
+
+    def _speak_text(self, text: str) -> SkillResult:
+        result = self.executor.execute(SkillCall(skill_name="speak", arguments={"text": text}))
+        if result.status != "success":
+            print(f"[pipeline] Speech announcement failed: {result.error}")
+        return result
 
     def handle_voice(self, seconds: Optional[int] = None, speak: bool = True) -> PipelineResult:
         listen_args = {}
@@ -152,36 +200,63 @@ class AlfredRuntime:
             raise RuntimeError(stt_result.error or "Speech-to-text failed")
 
         user_text = str(stt_result.output["text"])
-        return self.handle_text(text=user_text, input_type="voice", speak=speak)
+        return self.handle_text(
+            text=user_text,
+            input_type="voice",
+            speak=speak,
+            input_processing_results=[listen_result, stt_result],
+        )
 
     def record_task_history(
         self,
         request: UserRequest,
         plan: OrchestratorPlan,
         skill_results: List[SkillResult],
+        communication_results: List[SkillResult],
+        input_processing_results: List[SkillResult],
         completion: CompletionResult,
         response: FinalResponse,
     ) -> None:
-        if not skill_results:
-            return
-        if any(call.skill_name == "answer_task_history" for call in plan.skill_calls):
-            print("[memory] Skipping task-history query record.")
-            return
-
+        input_processing_result_records = [
+            result.model_dump(mode="json")
+            for result in input_processing_results
+        ]
+        skill_result_records = [
+            result.model_dump(mode="json")
+            for result in skill_results
+        ]
+        communication_result_records = [
+            result.model_dump(mode="json")
+            for result in communication_results
+        ]
         record = {
             "timestamp": utc_now_iso(),
             "request_id": request.request_id,
             "input_type": request.input_type,
+            "question": request.raw_text,
             "user_text": request.raw_text,
             "intent": plan.intent.value,
             "goal": plan.goal,
             "skill_names": [call.skill_name for call in plan.skill_calls],
+            "skill_calls": [
+                call.model_dump(mode="json")
+                for call in plan.skill_calls
+            ],
             "skill_statuses": {
                 result.skill_name: result.status
                 for result in skill_results
             },
+            "input_processing_results": input_processing_result_records,
+            "skill_results": skill_result_records,
+            "communication_results": communication_result_records,
+            "all_results": [
+                *input_processing_result_records,
+                *communication_result_records,
+                *skill_result_records,
+            ],
             "task_complete": completion.task_complete,
             "completion_reason": completion.reason,
+            "next_action": completion.next_action,
             "answer_text": response.answer_text,
             "run_dir": str(self.run_dir),
         }
@@ -189,6 +264,15 @@ class AlfredRuntime:
         print("[memory] Recorded task history entry:")
         print(record)
         self.logger.write_json("task_history_record.json", record)
+        self._persist_session_memory(record)
+
+    def _persist_session_memory(self, record: dict) -> None:
+        all_records = TASK_HISTORY.all()
+        self.logger.write_json("session_memory.json", all_records)
+        with self.session_memory_jsonl_path.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(record, ensure_ascii=False) + "\n")
+        print(f"[memory] Session memory written: {self.session_memory_json_path}")
+        print(f"[memory] Session memory appended: {self.session_memory_jsonl_path}")
 
     def _build_router(self) -> SkillRouter:
         router = SkillRouter()
@@ -211,6 +295,7 @@ class AlfredRuntime:
         router.register(PickBlueMarkerSkill(self.hardware))
         router.register(PickPlaceBlueMarkerSkill(self.hardware))
         router.register(EnzymeExperimentsSkill(self.hardware))
+        router.register(OrderingSkill())
         router.register(
             ReadNotesSkill(
                 self.settings,

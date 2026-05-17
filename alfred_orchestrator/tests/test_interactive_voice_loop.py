@@ -11,6 +11,8 @@ if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 
 from interactive_voice_loop import (  # noqa: E402
+    _get_tts_events,
+    _publish_tts_event,
     image_data_url,
     is_stream_disconnect,
     latest_successful_image_result,
@@ -72,3 +74,19 @@ def test_stream_disconnect_helper_treats_browser_ssl_eof_as_normal():
     assert is_stream_disconnect(BrokenPipeError("broken pipe")) is True
     assert is_stream_disconnect(OSError("EOF occurred in violation of protocol (_ssl.c:2426)"))
     assert is_stream_disconnect(RuntimeError("camera failed")) is False
+
+
+def test_tts_events_are_published_incrementally():
+    first = _publish_tts_event(
+        "test-request",
+        {"tts_audio_url": "/api/tts/test-request-pre-1.mp3", "tts_audio_bytes": 123},
+    )
+    second = _publish_tts_event(
+        "test-request",
+        {"tts_audio_url": "/api/tts/test-request.mp3", "tts_audio_bytes": 456},
+    )
+
+    assert first["index"] == 0
+    assert second["index"] == 1
+    assert _get_tts_events("test-request", after_index=-1) == [first, second]
+    assert _get_tts_events("test-request", after_index=0) == [second]

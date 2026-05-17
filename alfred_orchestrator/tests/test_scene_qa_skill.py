@@ -6,6 +6,7 @@ from typing import Any
 
 from app.config import Settings
 from app.hardware.resources import RobotMoveResult
+from app.memory.session_memory import SessionMemory
 from app.orchestrator.prompt_registry import PromptRegistry
 from app.skills.scene_qa import AnswerSceneQuestionSkill
 
@@ -71,6 +72,8 @@ def test_scene_qa_moves_to_overlook_captures_image_and_answers(tmp_path):
     settings = replace(Settings.load(), openai_api_key="test-key")
     prompts = PromptRegistry(settings.configs_dir / "prompts.yaml")
     hardware = FakeHardwareContext()
+    history = SessionMemory()
+    history.add({"user_text": "pick the marker", "answer_text": "Picked up the blue marker."})
     created_clients: list[FakeOpenAIClient] = []
 
     def client_factory(**kwargs: Any) -> FakeOpenAIClient:
@@ -83,6 +86,7 @@ def test_scene_qa_moves_to_overlook_captures_image_and_answers(tmp_path):
         prompt_registry=prompts,
         run_dir=tmp_path,
         hardware_context=hardware,
+        task_history=history,
         openai_client_factory=client_factory,
     )
 
@@ -95,3 +99,7 @@ def test_scene_qa_moves_to_overlook_captures_image_and_answers(tmp_path):
     assert result.output["confidence"] == 0.84
     assert result.output["question"] == "what color is the marker?"
     assert created_clients[0].responses.calls[0]["model"] == settings.openai_vision_model
+    prompt_text = created_clients[0].responses.calls[0]["input"][0]["content"][0]["text"]
+    assert "Full session memory" in prompt_text
+    assert "pick the marker" in prompt_text
+    assert "Use session memory only when it is relevant" in prompt_text

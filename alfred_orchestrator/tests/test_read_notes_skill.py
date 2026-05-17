@@ -6,6 +6,7 @@ from typing import Any
 
 from app.config import Settings
 from app.hardware.resources import RobotMoveResult
+from app.memory.session_memory import SessionMemory
 from app.orchestrator.prompt_registry import PromptRegistry
 from app.skills.read_notes import ReadNotesSkill
 
@@ -71,6 +72,8 @@ def test_read_notes_moves_to_overlook_captures_image_and_reads_text(tmp_path):
     settings = replace(Settings.load(), openai_api_key="test-key")
     prompts = PromptRegistry(settings.configs_dir / "prompts.yaml")
     hardware = FakeHardwareContext()
+    history = SessionMemory()
+    history.add({"user_text": "order apples", "answer_text": "I sent the order signal."})
     created_clients: list[FakeOpenAIClient] = []
 
     def client_factory(**kwargs: Any) -> FakeOpenAIClient:
@@ -83,6 +86,7 @@ def test_read_notes_moves_to_overlook_captures_image_and_reads_text(tmp_path):
         prompt_registry=prompts,
         run_dir=tmp_path,
         hardware_context=hardware,
+        task_history=history,
         openai_client_factory=client_factory,
     )
 
@@ -95,6 +99,10 @@ def test_read_notes_moves_to_overlook_captures_image_and_reads_text(tmp_path):
     assert result.output["answer_text"] == "Your note says, buy milk, and call Sam."
     assert result.output["confidence"] == 0.88
     assert created_clients[0].responses.calls[0]["model"] == settings.openai_vision_model
+    prompt_text = created_clients[0].responses.calls[0]["input"][0]["content"][0]["text"]
+    assert "Full session memory" in prompt_text
+    assert "order apples" in prompt_text
+    assert "Use session memory only when it helps" in prompt_text
 
 
 def test_read_notes_sends_contextual_note_question_to_vlm(tmp_path):

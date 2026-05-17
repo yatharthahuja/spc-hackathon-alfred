@@ -8,6 +8,7 @@ from typing import Any
 from openai import OpenAI
 
 from app.config import Settings
+from app.memory.session_memory import SessionMemory, TASK_HISTORY
 from app.orchestrator.json_utils import extract_json_object
 from app.orchestrator.prompt_registry import PromptRegistry
 from app.orchestrator.schemas import SkillResult, VLMResult
@@ -17,9 +18,15 @@ from app.skills.base import Skill, failure, success
 class DescribeImageWithVLMSkill(Skill):
     name = "describe_image_with_vlm"
 
-    def __init__(self, settings: Settings, prompt_registry: PromptRegistry):
+    def __init__(
+        self,
+        settings: Settings,
+        prompt_registry: PromptRegistry,
+        task_history: SessionMemory = TASK_HISTORY,
+    ):
         self.settings = settings
         self.prompt_registry = prompt_registry
+        self.task_history = task_history
 
     def run(self, **kwargs: Any) -> SkillResult:
         try:
@@ -34,6 +41,7 @@ class DescribeImageWithVLMSkill(Skill):
                 {
                     "user_text": user_text,
                     "question": question,
+                    "task_history": self.task_history.all(),
                 },
             )
             print("[describe_image_with_vlm] Image path:")
