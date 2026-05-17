@@ -21,8 +21,11 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = Settings.load()
+    print(f"AMAZON_API={settings.amazon_api}")
     print(f"AMAZON_USE_MOCK={settings.amazon_use_mock}")
+    print(f"Creators API ready={settings.amazon_creators_ready}")
     print(f"PA-API ready={settings.amazon_paapi_ready}")
+    print(f"Credential version={settings.amazon_credential_version}")
     print(f"Host={settings.amazon_host}  Region={settings.amazon_region}")
     print(f"SearchIndex={settings.amazon_search_index}")
     print(f"Query: {args.query}\n")

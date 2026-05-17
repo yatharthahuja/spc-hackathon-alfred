@@ -36,9 +36,14 @@ class Settings:
     camera_id: int
     record_seconds: int
     enable_physical_skills: bool
+    amazon_api: str
     amazon_use_mock: bool
     amazon_access_key: str
     amazon_secret_key: str
+    amazon_credential_id: str
+    amazon_credential_secret: str
+    amazon_credential_version: str
+    amazon_auth_endpoint: str
     amazon_partner_tag: str
     amazon_host: str
     amazon_region: str
@@ -48,6 +53,15 @@ class Settings:
     @property
     def amazon_paapi_ready(self) -> bool:
         return bool(self.amazon_access_key and self.amazon_secret_key and self.amazon_partner_tag)
+
+    @property
+    def amazon_creators_ready(self) -> bool:
+        return bool(
+            self.amazon_credential_id
+            and self.amazon_credential_secret
+            and self.amazon_partner_tag
+            and self.amazon_credential_version
+        )
 
     @classmethod
     def load(cls) -> "Settings":
@@ -70,9 +84,16 @@ class Settings:
             camera_id=int(os.getenv("ALFRED_CAMERA_ID", "0")),
             record_seconds=int(os.getenv("ALFRED_RECORD_SECONDS", "5")),
             enable_physical_skills=_bool_env("ALFRED_ENABLE_PHYSICAL_SKILLS", False),
+            amazon_api=os.getenv("AMAZON_API", "creators").strip().lower(),
             amazon_use_mock=_bool_env("AMAZON_USE_MOCK", True),
             amazon_access_key=os.getenv("AMAZON_ACCESS_KEY", ""),
             amazon_secret_key=os.getenv("AMAZON_SECRET_KEY", ""),
+            amazon_credential_id=os.getenv("AMAZON_CREDENTIAL_ID")
+            or os.getenv("AMAZON_ACCESS_KEY", ""),
+            amazon_credential_secret=os.getenv("AMAZON_CREDENTIAL_SECRET")
+            or os.getenv("AMAZON_SECRET_KEY", ""),
+            amazon_credential_version=os.getenv("AMAZON_CREDENTIAL_VERSION", "2.1"),
+            amazon_auth_endpoint=os.getenv("AMAZON_AUTH_ENDPOINT", ""),
             amazon_partner_tag=os.getenv("AMAZON_PARTNER_TAG", ""),
             amazon_host=os.getenv("AMAZON_PAAPI_HOST")
             or os.getenv("AMAZON_HOST", "webservices.amazon.com"),

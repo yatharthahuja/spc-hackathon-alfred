@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.integrations.amazon.base import AmazonSearchClient
 from app.integrations.amazon.models import AmazonProduct
+from app.integrations.amazon.parse import parse_first_search_item
 from app.integrations.amazon.paapi_sign import sign_paapi_request
 
 
@@ -80,35 +81,7 @@ class PaapiAmazonSearchClient(AmazonSearchClient):
         except URLError as exc:
             raise RuntimeError(f"Amazon PA-API request failed: {exc}") from exc
 
-        product = _parse_first_item(body)
+        product = parse_first_search_item(body)
         if product is None:
             raise RuntimeError(f"No Amazon products found for: {keywords}")
         return product
-
-
-def _parse_first_item(payload: Dict[str, Any]) -> Optional[AmazonProduct]:
-    items = (payload.get("SearchResult") or {}).get("Items") or []
-    if not items:
-        return None
-    item = items[0]
-    asin = str(item.get("ASIN") or "").strip()
-    if not asin:
-        return None
-    title = _nested_text(item, ["ItemInfo", "Title", "DisplayValue"]) or f"Amazon item {asin}"
-    detail_url = str(item.get("DetailPageURL") or f"https://www.amazon.com/dp/{asin}")
-    price_display = _nested_text(item, ["Offers", "Listings", 0, "Price", "DisplayAmount"])
-    return AmazonProduct(asin=asin, title=title, detail_url=detail_url, price_display=price_display)
-
-
-def _nested_text(data: Any, path: list[Any]) -> str:
-    current = data
-    for key in path:
-        if isinstance(key, int):
-            if not isinstance(current, list) or len(current) <= key:
-                return ""
-            current = current[key]
-        elif isinstance(current, dict):
-            current = current.get(key)
-        else:
-            return ""
-    return str(current or "").strip()
