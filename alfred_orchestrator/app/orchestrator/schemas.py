@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class Intent(str, Enum):
     DESCRIBE_DESK = "DESCRIBE_DESK"
+    RUN_SKILL = "RUN_SKILL"
     FIND_OBJECT = "FIND_OBJECT"
     MONITOR_SCENE = "MONITOR_SCENE"
     OCR_READ_TEXT = "OCR_READ_TEXT"
@@ -65,6 +66,13 @@ class VLMResult(BaseModel):
     uncertainties: List[str] = Field(default_factory=list)
     spoken_summary: str
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
+class SceneQAResult(BaseModel):
+    answer_text: str
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    evidence: List[str] = Field(default_factory=list)
+    uncertainties: List[str] = Field(default_factory=list)
 
 
 class CompletionResult(BaseModel):

@@ -27,7 +27,7 @@ class FakeSequencer:
         self.kwargs = kwargs
         self.connect_calls = 0
         self.disconnect_calls = 0
-        self.executed: list[str] = []
+        self.executed: list[Any] = []
         self.instances.append(self)
 
     def connect(self) -> None:
@@ -81,6 +81,17 @@ def test_robot_resource_connects_once_and_closes_once():
 
     robot.close()
     assert FakeSequencer.instances[0].disconnect_calls == 1
+
+
+def test_robot_resource_executes_pose_sequences():
+    FakeSequencer.instances.clear()
+    robot = resources.RobotResource(sequencer_factory=FakeSequencer)
+
+    result = robot.move_through_poses(["overlook", "overlook"])
+
+    assert result.moved is True
+    assert result.trajectory_names == ["overlook", "overlook"]
+    assert FakeSequencer.instances[0].executed == [["overlook", "overlook"]]
 
 
 def test_robot_resource_tolerates_unavailable_hardware():

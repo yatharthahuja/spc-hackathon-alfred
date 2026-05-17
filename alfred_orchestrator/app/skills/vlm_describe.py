@@ -36,6 +36,10 @@ class DescribeImageWithVLMSkill(Skill):
                     "question": question,
                 },
             )
+            print("[describe_image_with_vlm] Image path:")
+            print(image_path)
+            print("[describe_image_with_vlm] Prompt sent to VLM:")
+            print(prompt)
 
             client = OpenAI(api_key=self.settings.openai_api_key)
             response = client.responses.create(
@@ -51,6 +55,8 @@ class DescribeImageWithVLMSkill(Skill):
                 ],
             )
             raw_text = response.output_text
+            print("[describe_image_with_vlm] Raw VLM output:")
+            print(raw_text)
             parsed = extract_json_object(raw_text)
             vlm_result = VLMResult.model_validate(parsed)
             return success(

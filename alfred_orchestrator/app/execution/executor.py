@@ -18,20 +18,29 @@ class SkillExecutor:
     def execute_plan(self, plan: OrchestratorPlan) -> List[SkillResult]:
         results: List[SkillResult] = []
         outputs_by_skill: Dict[str, Dict[str, Any]] = {}
+        print("[executor] Starting plan execution")
+        print(f"[executor] Goal: {plan.goal}")
+        print(f"[executor] Skill count: {len(plan.skill_calls)}")
         for call in plan.skill_calls:
             resolved_call = SkillCall(
                 skill_name=call.skill_name,
                 arguments=self._resolve_arguments(call.arguments, outputs_by_skill),
             )
+            print(f"[executor] Resolved skill call: {resolved_call.skill_name}")
+            print(f"[executor] Resolved arguments: {resolved_call.arguments}")
             result = self.execute(resolved_call)
             results.append(result)
             outputs_by_skill[result.skill_name] = result.output
             if result.status == "error":
+                print(f"[executor] Stopping plan after error in {result.skill_name}: {result.error}")
                 break
+        print("[executor] Plan execution complete")
         return results
 
     def execute(self, call: SkillCall) -> SkillResult:
         started = time.perf_counter()
+        print(f"[executor] Executing skill: {call.skill_name}")
+        print(f"[executor] Skill input arguments: {call.arguments}")
         try:
             self.safety_gate.validate_skill(call.skill_name)
             skill = self.router.get(call.skill_name)
@@ -46,6 +55,13 @@ class SkillExecutor:
             result = SkillResult(skill_name=call.skill_name, status="error", error=str(exc))
 
         latency_ms = int((time.perf_counter() - started) * 1000)
+        print(f"[executor] Skill finished: {call.skill_name}")
+        print(f"[executor] Status: {result.status}")
+        print(f"[executor] Latency ms: {latency_ms}")
+        if result.error:
+            print(f"[executor] Error: {result.error}")
+        if result.output:
+            print(f"[executor] Output: {result.output}")
         self.logger.log(
             stage="skill_execution",
             status=result.status,

@@ -28,8 +28,15 @@ class TextToSpeechSkill(Skill):
                 raise RuntimeError("ELEVENLABS_API_KEY is required for TTS")
 
             audio_path = self.run_dir / "alfred_response.mp3"
+            print("[speak] Text sent to ElevenLabs TTS:")
+            print(text)
+            print(f"[speak] Voice id: {self.settings.elevenlabs_voice_id}")
+            print(f"[speak] Model: {self.settings.elevenlabs_tts_model}")
+            print(f"[speak] Output format: {self.settings.elevenlabs_output_format}")
             self._synthesize(text, audio_path)
+            print(f"[speak] Audio written: {audio_path} ({audio_path.stat().st_size} bytes)")
             audio_played = play_audio(audio_path)
+            print(f"[speak] Audio playback attempted: {audio_played}")
             return success(
                 self.name,
                 {

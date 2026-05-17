@@ -40,3 +40,46 @@ skills:
     inputs: [pose_name]
     outputs: [pose_name, moved]
     enabled: true
+
+  pick_blue_marker:
+    type: physical
+    description: Pick up the blue marker from the table and hold it. If the user says marker without a color, treat it as the blue marker.
+    inputs: []
+    outputs: [trajectory_names, robot_move_attempted, robot_moved, message]
+    trajectory_names: [pre_pick_marker, pick_marker, post_pick_marker]
+    examples:
+      - pick blue marker
+      - pick this blue marker
+      - pick the blue marker
+      - pick up the blue marker
+      - pick the marker
+      - grab marker
+    enabled: true
+
+  pick_place_blue_marker:
+    type: physical
+    description: Pick up the blue marker and place or drop it at the placement zone. If the user says marker without a color, treat it as the blue marker.
+    inputs: []
+    outputs: [trajectory_names, robot_move_attempted, robot_moved, message]
+    trajectory_names: [pre_pick_marker, pick_marker, post_pick_marker, pre_place, drop_marker]
+    examples:
+      - pick and place the blue marker
+      - pick place blue marker
+      - pick up and drop the blue marker
+      - move the blue marker to the place location
+      - pick and place the marker
+      - drop the marker
+    enabled: true
+
+  answer_scene_question:
+    type: vision
+    description: Move to the overlook pose, capture a wrist-camera image, and answer a user question about the visible scene.
+    inputs: [question]
+    outputs: [image_path, answer_text, confidence, raw_response]
+    examples:
+      - what color is the marker?
+      - what color is the pen?
+      - how many markers are there?
+      - is there a cup on the table?
+      - do you see a blue marker?
+    enabled: true

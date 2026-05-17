@@ -20,7 +20,10 @@ class ListenSkill(Skill):
         try:
             seconds = int(kwargs.get("seconds", self.settings.record_seconds))
             audio_path = Path(kwargs.get("audio_path") or self.run_dir / "audio_input.wav")
+            print(f"[listen] Recording voice for {seconds} seconds")
+            print(f"[listen] Audio output path: {audio_path}")
             record_wav(audio_path, seconds=seconds)
+            print(f"[listen] Voice received: {audio_path} ({audio_path.stat().st_size} bytes)")
             return success(self.name, {"audio_file": str(audio_path), "seconds": seconds})
         except Exception as exc:
             return failure(self.name, exc)

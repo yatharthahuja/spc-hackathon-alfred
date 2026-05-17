@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.config import Settings
 from app.logs.event_logger import EventLogger
 from app.orchestrator.orchestrator import AlfredOrchestrator
-from app.orchestrator.schemas import Intent, UserRequest
+from app.orchestrator.prompt_registry import PromptRegistry
+from app.orchestrator.schemas import Intent, SkillResult, UserRequest
+from app.orchestrator.skill_planner import CatalogSkillPlanner
 from app.orchestrator.task_registry import SkillCatalog
+
+
+def _orchestrator_with_catalog_planner(tmp_path):
+    settings = replace(Settings.load(), openai_api_key="")
+    logger = EventLogger(tmp_path, "test-request")
+    catalog = SkillCatalog(settings.configs_dir / "skills.yaml")
+    prompts = PromptRegistry(settings.configs_dir / "prompts.yaml")
+    planner = CatalogSkillPlanner(settings, catalog, prompts)
+    return AlfredOrchestrator(catalog, logger, skill_planner=planner)
 
 
 def test_rules_first_describe_desk_plan(tmp_path):
@@ -50,3 +63,90 @@ def test_unknown_intent_has_no_skill_calls(tmp_path):
 
     assert intent.intent == Intent.UNKNOWN
     assert plan.skill_calls == []
+
+
+def test_catalog_planner_maps_pick_blue_marker_variants(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    for text in [
+        "pick blue marker",
+        "pick this blue marker",
+        "pick the blue marker",
+        "pick up the blue marker",
+        "pick marker",
+        "pick the marker",
+        "grab the marker",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["pick_blue_marker"]
+
+
+def test_catalog_planner_maps_pick_place_blue_marker_variants(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    for text in [
+        "pick and place the blue marker",
+        "pick place blue marker",
+        "pick up and drop the blue marker",
+        "move the blue marker to the place location",
+        "pick and place the marker",
+        "drop the marker",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["pick_place_blue_marker"]
+
+
+def test_catalog_planner_maps_scene_questions_to_scene_qa(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    for text in [
+        "what color is the marker?",
+        "what color is the pen?",
+        "how many markers are there?",
+        "is there a cup on the table?",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["answer_scene_question"]
+        assert plan.skill_calls[0].arguments["question"] == text
+
+
+def test_catalog_planner_leaves_unknown_request_without_skill_calls(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+    request = UserRequest(request_id="test-request", raw_text="Order soup ingredients")
+
+    intent = orchestrator.classify_intent(request.raw_text)
+    plan = orchestrator.create_plan(request, intent)
+
+    assert plan.intent == Intent.UNKNOWN
+    assert plan.skill_calls == []
+
+
+def test_final_answer_uses_scene_qa_answer_text(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+    request = UserRequest(request_id="test-request", raw_text="what color is the marker?")
+
+    response = orchestrator.generate_final_answer(
+        request,
+        [
+            SkillResult(
+                skill_name="answer_scene_question",
+                status="success",
+                output={"answer_text": "The marker appears to be blue."},
+            )
+        ],
+    )
+
+    assert response.task_complete is True
+    assert response.answer_text == "The marker appears to be blue."

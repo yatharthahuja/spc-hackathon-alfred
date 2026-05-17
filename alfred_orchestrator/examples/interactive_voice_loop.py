@@ -785,10 +785,17 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     print_header("Browser Demo Request")
+    print(f"Request id: {request_id}")
+    print(f"Camera id: {camera_id}")
+    print(f"Speak requested: {bool(payload.get('speak', True))}")
+    print(f"Require robot move: {require_robot_move}")
+    print(f"Payload keys: {sorted(payload.keys())}")
+    print(f"Uploaded audio data URL chars: {len(str(payload.get('audio_data_url', '')))}")
+
     print_step("1", "Saving browser audio")
     audio_path = save_data_url(payload["audio_data_url"], run_dir / "browser_audio")
     audio_size = audio_path.stat().st_size
-    print(f"Saved audio: {audio_path} ({audio_size} bytes)")
+    print(f"Voice received and saved: {audio_path} ({audio_size} bytes)")
     if audio_size < 4096:
         raise RuntimeError(
             "Browser microphone upload was too small to contain usable speech "
@@ -801,12 +808,15 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     print_step("2", "Sending audio to ElevenLabs speech-to-text")
     stt_model = load_env_value("ELEVENLABS_STT_MODEL") or "scribe_v1"
+    print(f"Voice sent to STT model: {stt_model}")
+    print(f"STT audio path: {audio_path}")
     transcript_payload = transcribe_audio(
         api_key=api_key,
         model_id=stt_model,
         audio_path=audio_path,
         timeout=120,
     )
+    print_json_block("STT raw output", transcript_payload)
     transcript = str(transcript_payload.get("text") or "").strip()
     print(f"Transcript: {transcript}")
     if not transcript:
@@ -822,6 +832,7 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     runtime.logger.request_id = request_id
     runtime.orchestrator.camera_id = camera_id
     print(f"Run artifacts directory: {runtime.run_dir}")
+    print(f"Registered skills: {runtime.router.names()}")
 
     print_step("4", "Classifying intent")
     request = UserRequest(request_id=request_id, input_type="voice", raw_text=transcript)
@@ -835,8 +846,10 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     print_step("5", "Creating skill plan")
     plan = runtime.orchestrator.create_plan(request, intent_result)
     print(f"Goal: {plan.goal}")
+    print_json_block("Full plan", plan.model_dump(mode="json"))
     for index, call in enumerate(plan.skill_calls, start=1):
-        print(f"  {index}. {call.skill_name} {call.arguments}")
+        print(f"Selected skill {index}: {call.skill_name}")
+        print_json_block("Selected skill arguments", call.arguments)
 
     print_step("6", "Executing skills")
     skill_results = []
@@ -851,6 +864,7 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
             arguments=runtime.executor._resolve_arguments(call_arguments, outputs_by_skill),
         )
         print(f"Executing skill: {resolved_call.skill_name}")
+        print_json_block("Resolved skill arguments", resolved_call.arguments)
         result = runtime.executor.execute(resolved_call)
         skill_results.append(result)
         outputs_by_skill[result.skill_name] = result.output
@@ -909,6 +923,7 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     print_step("8", "Generating final response")
     final_response = runtime.orchestrator.generate_final_answer(request, skill_results)
+    print_json_block("Final response object", final_response.model_dump(mode="json"))
     print(f"Alfred answer: {final_response.answer_text}")
     print(f"Response confidence: {final_response.confidence}")
 
@@ -924,6 +939,10 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         print_step("9", "Synthesizing TTS for phone playback")
         try:
             mp3_path = run_dir / "alfred_response.mp3"
+            print(f"Text sent to TTS: {final_response.answer_text}")
+            print(f"TTS voice id: {settings.elevenlabs_voice_id}")
+            print(f"TTS model: {settings.elevenlabs_tts_model}")
+            print(f"TTS output format: {settings.elevenlabs_output_format}")
             synthesize_speech(
                 api_key=api_key,
                 voice_id=settings.elevenlabs_voice_id,
@@ -938,6 +957,7 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
             tts_audio_url = f"/api/tts/{request_id}.mp3"
             tts_audio_bytes = len(mp3_bytes)
             print(f"TTS bytes: {tts_audio_bytes} → served at {tts_audio_url}")
+            print(f"TTS audio file: {mp3_path}")
         except Exception as exc:
             tts_error = str(exc)
             print(f"TTS failed: {exc}")
@@ -1025,6 +1045,14 @@ def print_step(label: str, title: str) -> None:
     print()
     print(f"[{label}] {title}", flush=True)
     print("-" * (len(str(label)) + len(title) + 3), flush=True)
+
+
+def print_json_block(title: str, payload: Any) -> None:
+    print(f"{title}:")
+    try:
+        print(json.dumps(payload, indent=2, ensure_ascii=False), flush=True)
+    except TypeError:
+        print(repr(payload), flush=True)
 
 
 # ──────────────────────────────────────────────────────────────────────

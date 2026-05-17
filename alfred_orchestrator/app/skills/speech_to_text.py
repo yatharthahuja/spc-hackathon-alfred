@@ -19,7 +19,9 @@ class SpeechToTextSkill(Skill):
     def run(self, **kwargs: Any) -> SkillResult:
         try:
             audio_path = Path(str(kwargs["audio_file"]))
+            print(f"[speech_to_text] Voice sent to STT: {audio_path}")
             text = self.transcribe(audio_path)
+            print(f"[speech_to_text] Transcript: {text}")
             return success(self.name, {"text": text, "audio_file": str(audio_path)})
         except Exception as exc:
             return failure(self.name, exc)
@@ -28,6 +30,7 @@ class SpeechToTextSkill(Skill):
         if not self.settings.elevenlabs_api_key:
             raise RuntimeError("ELEVENLABS_API_KEY is required for speech-to-text")
 
+        print(f"[speech_to_text] STT model: {self.settings.elevenlabs_stt_model}")
         with audio_path.open("rb") as audio_file:
             response = requests.post(
                 "https://api.elevenlabs.io/v1/speech-to-text",
@@ -38,6 +41,7 @@ class SpeechToTextSkill(Skill):
             )
         response.raise_for_status()
         payload = response.json()
+        print(f"[speech_to_text] STT raw output: {payload}")
         text = str(payload.get("text", "")).strip()
         if not text:
             raise RuntimeError(f"ElevenLabs STT returned no text: {payload}")

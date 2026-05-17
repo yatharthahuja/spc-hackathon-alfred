@@ -15,14 +15,22 @@ from app.orchestrator.schemas import (
     TaskStep,
     UserRequest,
 )
+from app.orchestrator.skill_planner import CatalogSkillPlanner, SkillPlanChoice
 from app.orchestrator.task_registry import SkillCatalog
 
 
 class AlfredOrchestrator:
-    def __init__(self, skill_catalog: SkillCatalog, logger: EventLogger, camera_id: int = 0):
+    def __init__(
+        self,
+        skill_catalog: SkillCatalog,
+        logger: EventLogger,
+        camera_id: int = 0,
+        skill_planner: CatalogSkillPlanner | None = None,
+    ):
         self.skill_catalog = skill_catalog
         self.logger = logger
         self.camera_id = camera_id
+        self.skill_planner = skill_planner
 
     def classify_intent(self, text: str) -> IntentResult:
         normalized = text.lower()
@@ -111,6 +119,9 @@ class AlfredOrchestrator:
                     "User-facing answer generated",
                 ],
             )
+        elif self.skill_planner is not None:
+            choice = self.skill_planner.choose_skill(request.raw_text)
+            plan = self._plan_from_skill_choice(request, choice)
         else:
             plan = OrchestratorPlan(
                 goal="Ask user for a supported request",
@@ -131,6 +142,50 @@ class AlfredOrchestrator:
             output_data=plan.model_dump(mode="json"),
         )
         return plan
+
+    def _plan_from_skill_choice(
+        self,
+        request: UserRequest,
+        choice: SkillPlanChoice,
+    ) -> OrchestratorPlan:
+        self.logger.log(
+            stage="skill_planning",
+            status="success" if not choice.is_unknown else "info",
+            input_data={"text": request.raw_text},
+            output_data={
+                "skill_name": choice.skill_name,
+                "arguments": choice.arguments,
+                "confidence": choice.confidence,
+                "reason": choice.reason,
+            },
+        )
+        if choice.is_unknown or choice.confidence < 0.5:
+            return OrchestratorPlan(
+                goal="Ask user for a supported request",
+                intent=Intent.UNKNOWN,
+                tasks=[],
+                skill_calls=[],
+                completion_criteria=["User received unsupported intent message"],
+            )
+
+        return OrchestratorPlan(
+            goal=request.raw_text,
+            intent=Intent.RUN_SKILL,
+            tasks=[
+                TaskStep(
+                    task_id="t1",
+                    agent="catalog_skill_planner",
+                    required_skills=[choice.skill_name],
+                )
+            ],
+            skill_calls=[
+                SkillCall(
+                    skill_name=choice.skill_name,
+                    arguments=choice.arguments,
+                )
+            ],
+            completion_criteria=["Selected skill completed successfully"],
+        )
 
     def generate_final_answer(
         self,
@@ -162,11 +217,35 @@ class AlfredOrchestrator:
                 summary = str(vlm_result.output.get("spoken_summary", ""))
                 confidence = float(vlm_result.output.get("confidence", 0.8))
 
-            response = FinalResponse(
-                task_complete=bool(summary),
-                answer_text=summary or "I captured an image, but I could not describe the desk clearly.",
-                confidence=confidence if summary else 0.3,
-            )
+            if vlm_result and summary:
+                response = FinalResponse(
+                    task_complete=True,
+                    answer_text=summary,
+                    confidence=confidence,
+                )
+            elif vlm_result:
+                response = FinalResponse(
+                    task_complete=False,
+                    answer_text="I captured an image, but I could not describe the desk clearly.",
+                    confidence=0.3,
+                )
+            else:
+                successful_result = next(
+                    (result for result in results if result.status == "success"),
+                    None,
+                )
+                message = ""
+                if successful_result:
+                    message = str(
+                        successful_result.output.get("answer_text")
+                        or successful_result.output.get("message")
+                        or ""
+                    ).strip()
+                response = FinalResponse(
+                    task_complete=successful_result is not None,
+                    answer_text=message or "Done.",
+                    confidence=0.9 if successful_result else 0.3,
+                )
 
         self.logger.write_text("final_answer.txt", response.answer_text)
         self.logger.log(
@@ -204,17 +283,23 @@ class AlfredOrchestrator:
                 None,
             )
             summary = str(vlm_result.output.get("spoken_summary", "")) if vlm_result else ""
-            if len(summary.strip()) > 10:
+            if vlm_result and len(summary.strip()) > 10:
                 completion = CompletionResult(
                     task_complete=True,
                     reason="The VLM returned a usable desk description.",
                     next_action="none",
                 )
-            else:
+            elif vlm_result:
                 completion = CompletionResult(
                     task_complete=False,
                     reason="The vision result was empty or too short.",
                     next_action="retake_image",
+                )
+            else:
+                completion = CompletionResult(
+                    task_complete=True,
+                    reason="The planned skill completed successfully.",
+                    next_action="none",
                 )
 
         self.logger.write_json("completion.json", completion.model_dump(mode="json"))

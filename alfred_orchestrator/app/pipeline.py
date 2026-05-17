@@ -14,10 +14,13 @@ from app.logs.event_logger import EventLogger
 from app.orchestrator.orchestrator import AlfredOrchestrator
 from app.orchestrator.prompt_registry import PromptRegistry
 from app.orchestrator.schemas import CompletionResult, FinalResponse, SkillCall, SkillResult, UserRequest
+from app.orchestrator.skill_planner import CatalogSkillPlanner
 from app.orchestrator.task_registry import SkillCatalog
 from app.skills.camera import CaptureWristCameraImageSkill
 from app.skills.arm_motion import MoveArmNoopSkill
 from app.skills.listen import ListenSkill
+from app.skills.marker import PickBlueMarkerSkill, PickPlaceBlueMarkerSkill
+from app.skills.scene_qa import AnswerSceneQuestionSkill
 from app.skills.speech_to_text import SpeechToTextSkill
 from app.skills.text_to_speech import TextToSpeechSkill
 from app.skills.vlm_describe import DescribeImageWithVLMSkill
@@ -60,6 +63,7 @@ class AlfredRuntime:
             skill_catalog=self.catalog,
             logger=self.logger,
             camera_id=settings.camera_id,
+            skill_planner=CatalogSkillPlanner(self.settings, self.catalog, self.prompts),
         )
 
     def close(self) -> None:
@@ -144,4 +148,14 @@ class AlfredRuntime:
         router.register(DescribeImageWithVLMSkill(self.settings, self.prompts))
         router.register(TextToSpeechSkill(self.settings, self.run_dir))
         router.register(MoveArmNoopSkill())
+        router.register(PickBlueMarkerSkill(self.hardware))
+        router.register(PickPlaceBlueMarkerSkill(self.hardware))
+        router.register(
+            AnswerSceneQuestionSkill(
+                self.settings,
+                self.prompts,
+                self.run_dir,
+                self.hardware,
+            )
+        )
         return router

@@ -4,7 +4,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 import cv2
 
@@ -27,6 +27,26 @@ class RobotMoveResult:
     def output(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "robot_pose_name": self.pose_name,
+            "robot_move_attempted": self.attempted,
+            "robot_moved": self.moved,
+            "robot_unavailable": self.unavailable,
+        }
+        if self.error:
+            data["robot_error"] = self.error
+        return data
+
+
+@dataclass
+class RobotSequenceResult:
+    trajectory_names: list[str]
+    attempted: bool
+    moved: bool
+    unavailable: bool = False
+    error: str | None = None
+
+    def output(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "trajectory_names": self.trajectory_names,
             "robot_move_attempted": self.attempted,
             "robot_moved": self.moved,
             "robot_unavailable": self.unavailable,
@@ -143,6 +163,56 @@ class RobotResource:
                 attempted=True,
                 moved=moved,
                 error=None if moved else f"Robot did not settle at pose {pose_name!r}",
+            )
+
+    def move_through_poses(self, pose_names: Iterable[str]) -> RobotSequenceResult:
+        names = [str(name) for name in pose_names]
+        with self._lock:
+            if not names:
+                return RobotSequenceResult(
+                    trajectory_names=[],
+                    attempted=False,
+                    moved=True,
+                )
+
+            if not self.connected and not self.connect():
+                return RobotSequenceResult(
+                    trajectory_names=names,
+                    attempted=True,
+                    moved=False,
+                    unavailable=True,
+                    error=self.last_error or "robot is unavailable",
+                )
+
+            if hasattr(self._sequencer, "has"):
+                missing = [name for name in names if not self._sequencer.has(name)]
+                if missing:
+                    return RobotSequenceResult(
+                        trajectory_names=names,
+                        attempted=True,
+                        moved=False,
+                        error=f"Robot poses {missing!r} are not defined in {self.poses_file}",
+                    )
+
+            try:
+                print(f"[hardware] Moving robot through {names!r}.", flush=True)
+                moved = bool(self._sequencer.execute(names))
+            except Exception as exc:
+                self.connected = False
+                self.unavailable = True
+                self.last_error = str(exc)
+                return RobotSequenceResult(
+                    trajectory_names=names,
+                    attempted=True,
+                    moved=False,
+                    error=f"Robot sequence {names!r} failed: {exc}",
+                )
+
+            return RobotSequenceResult(
+                trajectory_names=names,
+                attempted=True,
+                moved=moved,
+                error=None if moved else f"Robot did not settle through sequence {names!r}",
             )
 
     def close(self) -> None:

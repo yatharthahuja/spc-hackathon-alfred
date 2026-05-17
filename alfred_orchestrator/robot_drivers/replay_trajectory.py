@@ -185,6 +185,8 @@ def main() -> int:
         )
         args.names = ["pre_pick_marker", "pick_marker", "post_pick_marker", "pre_place", "drop_marker"]
 
+        # args.names = ["pre_pick_marker", "pick_marker", "post_pick_marker"]
+
     missing = [n for n in args.names if n not in poses]
     if missing:
         print(f"Error: unknown pose names: {missing}", file=sys.stderr)
