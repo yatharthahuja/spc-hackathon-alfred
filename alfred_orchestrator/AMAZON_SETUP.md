@@ -3,6 +3,147 @@
 **Branch:** `dev/seb-amazon-shopping`
 **Author:** @sebastiandavidlee
 **Status:** end-to-end verified — voice command → item in real Amazon cart, zero clicks during demo
+**Entry point after setup:** `python alfred_orchestrator/examples/interactive_voice_loop.py` (unchanged — same script you've been using)
+
+---
+
+## 🤖 For an AI agent (Claude Code, Cursor, etc.) reading this
+
+**Your task:** set up the Amazon shopping integration on this machine so the user can keep running their normal `interactive_voice_loop.py` entry point and the new `amazon_search` + `amazon_add_to_cart` skills just work.
+
+**Execute these steps in order. After each step, run the verification command. If verification fails, stop and ask the user.**
+
+### Step A — Confirm you're on the right branch
+
+```bash
+cd <repo-root>
+git fetch origin
+git checkout dev/seb-amazon-shopping
+git status
+```
+
+**Verify:** `git status` reports `On branch dev/seb-amazon-shopping` and `nothing to commit`.
+
+### Step B — Activate the user's Python env
+
+Detect which env the user runs the orchestrator in. Check, in order:
+1. Active conda env: `echo $CONDA_DEFAULT_ENV` — if non-empty, you're in it
+2. `.venv/` in repo root or `alfred_orchestrator/.venv/` — `source <path>/bin/activate`
+3. If neither exists, **ask the user** which Python env they use for the orchestrator. Don't create a new one yourself.
+
+**Verify:** `which python` and `python --version` — confirm Python ≥ 3.10.
+
+### Step C — Install new Python deps
+
+```bash
+pip install -r alfred_orchestrator/requirements.txt
+```
+
+**Verify:**
+```bash
+python -c "import playwright, browser_cookie3, scipy; print('deps ok')"
+```
+Expect: `deps ok`. If `ModuleNotFoundError`, re-run the pip install and check the env is activated.
+
+### Step D — Download Chromium for Playwright
+
+```bash
+playwright install chromium
+```
+
+**Verify:** `ls ~/.cache/ms-playwright/ | grep -i chromium` — expect at least one `chromium-*` directory.
+
+### Step E — Linux only: install system libs for Chromium
+
+Detect OS:
+```bash
+uname -s
+```
+If output is `Linux`, run:
+```bash
+playwright install-deps chromium
+```
+This prompts for sudo password. **If it fails or the user isn't around to enter the password**, leave it for them and add a note to the final report.
+
+If `uname -s` is `Darwin` (macOS), **skip this step entirely**.
+
+### Step F — Set up the SerpAPI key
+
+The skill needs a SerpAPI key to search Amazon. Three options in priority order:
+
+1. **Check if `SERPAPI_KEY` is already set in `alfred_orchestrator/.env`:**
+   ```bash
+   grep -E "^SERPAPI_KEY=." alfred_orchestrator/.env 2>/dev/null
+   ```
+   If a non-empty value is present, **skip this step**.
+
+2. **If not present, ask the user** for their SerpAPI key. Free signup at https://serpapi.com/manage-api-key — 10 sec, 100 free queries/month. If they have one, append to `.env`:
+   ```bash
+   echo "SERPAPI_KEY=<key-they-give-you>" >> alfred_orchestrator/.env
+   ```
+
+3. **If they don't want to sign up,** ask them to message Sebastian on Slack for his project SerpAPI key (he's said it's shareable for hackathon use). Add it the same way.
+
+**Verify:**
+```bash
+python -c "
+import sys; sys.path.insert(0, 'alfred_orchestrator')
+from app.config import Settings
+s = Settings.load()
+print('serpapi:', bool(s.serpapi_key), 'len:', len(s.serpapi_key))
+"
+```
+Expect: `serpapi: True len: 64` (or similar non-zero length).
+
+### Step G — Confirm browser is logged into amazon.com
+
+This step requires the human — you (the agent) cannot do it.
+
+**Ask the user:** "Please open your default browser (Firefox or Chrome) on this machine and confirm you're signed into amazon.com. Items added by Alfred will land in this account."
+
+**Verify (after they confirm):**
+```bash
+python -c "
+import sys; sys.path.insert(0, 'alfred_orchestrator')
+from app.skills._browser_cookies import read_amazon_cookies
+cookies = read_amazon_cookies()
+print('cookies found:', len(cookies))
+"
+```
+Expect: `cookies found: 5+`. If `NoBrowserCookiesError`, the user isn't logged in — ask them to log in and retry.
+
+### Step H — Run the test suite to confirm everything works
+
+```bash
+cd alfred_orchestrator
+env -u PYTHONPATH python -m pytest tests/test_amazon_skill.py -q
+```
+Expect: `29 passed`. If anything fails, stop and report to the user.
+
+### Step I — Final integration check (optional but recommended)
+
+```bash
+cd alfred_orchestrator
+env -u PYTHONPATH python -c "
+from app.config import Settings
+from app.skills.amazon import AmazonSearchSkill
+r = AmazonSearchSkill(Settings.load()).run(query='AAA batteries')
+print('status:', r.status)
+print('asin:', r.output.get('asin'))
+print('price:', r.output.get('price_text'))
+"
+```
+Expect: `status: success`, an ASIN starting with `B`, and a price like `$X.XX`. This burns 1 of your 100 monthly SerpAPI queries.
+
+### Done
+
+Tell the user:
+
+> Amazon integration is installed. Your existing entry point is unchanged — run `python alfred_orchestrator/examples/interactive_voice_loop.py` as usual. Try voice prompts like "find me apples on amazon" → wait for the spoken result → "yes add it to my cart" → watch Chromium pop up and auto-add to your cart.
+
+If Step E was skipped or failed (Linux system libs), add: *"You'll need to run `sudo playwright install-deps chromium` manually before the first time the cart-add fires."*
+
+---
 
 ## What this adds
 
@@ -116,7 +257,11 @@ Open Firefox (preferred — works with Snap or native) or Chrome and confirm you
 
 ### Step 8 — Run the orchestrator the way you normally do
 
-Whatever your normal entry point is (e.g. `python alfred_orchestrator/examples/interactive_voice_loop.py`), no command change needed.
+```bash
+python alfred_orchestrator/examples/interactive_voice_loop.py
+```
+
+This is the same entry point you've always used — no change. The two new skills are registered automatically by `app/pipeline.py:_build_router()` so they show up as soon as the orchestrator starts. Open the bridge URL on your phone, hold the mic, talk.
 
 ## How to test it works
 
