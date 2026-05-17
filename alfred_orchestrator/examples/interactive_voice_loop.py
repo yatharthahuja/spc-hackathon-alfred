@@ -1048,7 +1048,43 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if tts_event is not None:
                     tts_audio_events.append(tts_event)
                     time.sleep(0.5)
-        result = runtime.executor.execute(resolved_call)
+        if resolved_call.skill_name == "speak":
+            print_step("6b", "Publishing requested speech to phone")
+            text = str(resolved_call.arguments.get("text") or "").strip()
+            if text and speak_requested:
+                result, tts_event = synthesize_browser_tts(
+                    request_id=f"{request_id}-skill-speak-{len(communication_results) + 1}",
+                    event_request_id=request_id,
+                    settings=settings,
+                    api_key=api_key,
+                    run_dir=run_dir,
+                    text=text,
+                    output_name=f"alfred_skill_speak_{len(communication_results) + 1}.mp3",
+                )
+                communication_results.append(result)
+                if tts_event is not None:
+                    tts_audio_events.append(tts_event)
+                    time.sleep(0.5)
+            elif text:
+                result = SkillResult(
+                    skill_name="speak",
+                    status="success",
+                    output={
+                        "text": text,
+                        "audio_played": False,
+                        "playback_target": "browser",
+                        "skipped_reason": "Speak toggle was off.",
+                    },
+                )
+            else:
+                result = SkillResult(
+                    skill_name="speak",
+                    status="error",
+                    error="Text is required for TTS",
+                    output={},
+                )
+        else:
+            result = runtime.executor.execute(resolved_call)
         skill_results.append(result)
         outputs_by_skill[result.skill_name] = result.output
         print(f"Skill: {result.skill_name}")
