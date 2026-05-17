@@ -146,6 +146,11 @@ def test_catalog_planner_maps_pick_place_blue_marker_variants(tmp_path):
         "move the blue marker to the place location",
         "pick and place the marker",
         "drop the marker",
+        "pick the sharpie",
+        "pick the sharpy",
+        "remove the marker from the table",
+        "remove the sharpie from the table",
+        "clean up the table",
     ]:
         request = UserRequest(request_id="test-request", raw_text=text)
         intent = orchestrator.classify_intent(request.raw_text)
@@ -161,6 +166,7 @@ def test_catalog_planner_maps_scene_questions_to_scene_qa(tmp_path):
     for text in [
         "what color is the marker?",
         "what color is the pen?",
+        "what color is the sharpie?",
         "how many markers are there?",
         "is there a cup on the table?",
     ]:
@@ -173,15 +179,43 @@ def test_catalog_planner_maps_scene_questions_to_scene_qa(tmp_path):
         assert plan.skill_calls[0].arguments["question"] == text
 
 
-def test_catalog_planner_leaves_unknown_request_without_skill_calls(tmp_path):
+def test_catalog_planner_maps_note_reading_requests(tmp_path):
     orchestrator = _orchestrator_with_catalog_planner(tmp_path)
-    request = UserRequest(request_id="test-request", raw_text="Order soup ingredients")
 
-    intent = orchestrator.classify_intent(request.raw_text)
-    plan = orchestrator.create_plan(request, intent)
+    for text in [
+        "read my notes",
+        "what do my notes say?",
+        "read the note",
+        "what text is written on the paper?",
+        "tell me what is written in my notes",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
 
-    assert plan.intent == Intent.UNKNOWN
-    assert plan.skill_calls == []
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["read_notes"]
+        assert plan.skill_calls[0].arguments["user_text"] == text
+
+
+def test_catalog_planner_maps_general_conversation_fallback(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    for text in [
+        "hi Alfred",
+        "how are you today?",
+        "what is your name?",
+        "what skills do you have?",
+        "what is the capital of the USA?",
+        "Order soup ingredients",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["general_conversation"]
+        assert plan.skill_calls[0].arguments["question"] == text
 
 
 def test_final_answer_uses_scene_qa_answer_text(tmp_path):

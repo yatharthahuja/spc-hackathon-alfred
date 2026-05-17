@@ -31,7 +31,7 @@ def main() -> int:
     args = parser.parse_args()
 
     api_key = load_env_value("ELEVENLABS_API_KEY")
-    stt_model = load_env_value("ELEVENLABS_STT_MODEL") or "scribe_v1"
+    stt_model = load_env_value("ELEVENLABS_STT_MODEL") or Settings.load().elevenlabs_stt_model
     if not api_key:
         print("ELEVENLABS_API_KEY was not found in the environment, .env, or .env.example.")
         return 1

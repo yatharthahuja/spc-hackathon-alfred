@@ -83,8 +83,8 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_SKILLS_YAML = HERE / "skills.yaml"
 DEFAULT_POSES_YAML = HERE / "arm_poses.yaml"
 
-OPENAI_TEXT_MODEL = os.environ.get("ORCH_TEXT_MODEL", "gpt-4o-mini")
-OPENAI_VISION_MODEL = os.environ.get("ORCH_VISION_MODEL", "gpt-4o-mini")
+OPENAI_TEXT_MODEL = os.environ.get("ORCH_TEXT_MODEL", "gpt-5.5")
+OPENAI_VISION_MODEL = os.environ.get("ORCH_VISION_MODEL", "gpt-5.5")
 OPENAI_STT_MODEL = os.environ.get("ORCH_STT_MODEL", "whisper-1")
 
 

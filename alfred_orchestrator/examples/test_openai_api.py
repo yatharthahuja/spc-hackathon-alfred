@@ -71,7 +71,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Test the OpenAI Responses API key.")
     parser.add_argument(
         "--model",
-        default=load_env_value("OPENAI_REASONING_MODEL") or "gpt-4.1-mini",
+        default=load_env_value("OPENAI_REASONING_MODEL") or "gpt-5.5",
     )
     parser.add_argument(
         "--prompt",

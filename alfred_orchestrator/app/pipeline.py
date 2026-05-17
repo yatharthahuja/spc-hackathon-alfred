@@ -27,8 +27,10 @@ from app.orchestrator.skill_planner import CatalogSkillPlanner
 from app.orchestrator.task_registry import SkillCatalog
 from app.skills.camera import CaptureWristCameraImageSkill
 from app.skills.arm_motion import MoveArmNoopSkill
+from app.skills.conversation import GeneralConversationSkill
 from app.skills.listen import ListenSkill
 from app.skills.marker import GoHomeSkill, GoOverlookSkill, PickBlueMarkerSkill, PickPlaceBlueMarkerSkill
+from app.skills.read_notes import ReadNotesSkill
 from app.skills.scene_qa import AnswerSceneQuestionSkill
 from app.skills.speech_to_text import SpeechToTextSkill
 from app.skills.task_history import AnswerTaskHistorySkill
@@ -54,6 +56,7 @@ class AlfredRuntime:
         connect_hardware: bool = True,
     ):
         self.settings = settings
+        self.settings.print_model_configuration()
         self.request_id = str(uuid4())
         self.run_dir = run_dir or settings.new_run_dir("alfred_demo")
         self.logger = EventLogger(self.run_dir, self.request_id)
@@ -194,12 +197,21 @@ class AlfredRuntime:
         )
         router.register(DescribeImageWithVLMSkill(self.settings, self.prompts))
         router.register(AnswerTaskHistorySkill(self.settings, self.prompts))
+        router.register(GeneralConversationSkill(self.settings, self.prompts, self.catalog))
         router.register(TextToSpeechSkill(self.settings, self.run_dir))
         router.register(MoveArmNoopSkill())
         router.register(GoHomeSkill(self.hardware))
         router.register(GoOverlookSkill(self.hardware))
         router.register(PickBlueMarkerSkill(self.hardware))
         router.register(PickPlaceBlueMarkerSkill(self.hardware))
+        router.register(
+            ReadNotesSkill(
+                self.settings,
+                self.prompts,
+                self.run_dir,
+                self.hardware,
+            )
+        )
         router.register(
             AnswerSceneQuestionSkill(
                 self.settings,

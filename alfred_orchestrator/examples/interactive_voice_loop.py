@@ -807,7 +807,7 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     print("Using shared hardware context for robot motion and wrist-camera capture.")
 
     print_step("2", "Sending audio to ElevenLabs speech-to-text")
-    stt_model = load_env_value("ELEVENLABS_STT_MODEL") or "scribe_v1"
+    stt_model = load_env_value("ELEVENLABS_STT_MODEL") or settings.elevenlabs_stt_model
     print(f"Voice sent to STT model: {stt_model}")
     print(f"STT audio path: {audio_path}")
     transcript_payload = transcribe_audio(
@@ -1140,7 +1140,9 @@ def run_terminal_only(args: argparse.Namespace) -> int:
 
     load_env_into_process()
     api_key = load_env_value("ELEVENLABS_API_KEY")
-    stt_model = load_env_value("ELEVENLABS_STT_MODEL") or "scribe_v1"
+    settings = Settings.load()
+    settings.print_model_configuration()
+    stt_model = load_env_value("ELEVENLABS_STT_MODEL") or settings.elevenlabs_stt_model
     if not api_key:
         print("ELEVENLABS_API_KEY was not found in the environment, .env, or .env.example.")
         return 1
@@ -1226,7 +1228,6 @@ def run_terminal_only(args: argparse.Namespace) -> int:
     if not transcript:
         return 1
 
-    settings = Settings.load()
     with AlfredRuntime(settings) as runtime:
         request = UserRequest(request_id=runtime.request_id, input_type="voice", raw_text=transcript)
         runtime.logger.write_text("transcript.txt", request.raw_text)

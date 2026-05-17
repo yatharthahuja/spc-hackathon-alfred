@@ -46,13 +46,23 @@ class CatalogSkillPlanner:
 
         llm_choice = self._choose_with_llm(user_text)
         if llm_choice is not None:
-            print("[planner] LLM skill selection")
-            print(f"[planner] User text: {user_text}")
-            print(f"[planner] Selected skill: {llm_choice.skill_name}")
-            print(f"[planner] Arguments: {llm_choice.arguments}")
-            print(f"[planner] Confidence: {llm_choice.confidence}")
+            if not llm_choice.is_unknown:
+                print("[planner] LLM skill selection")
+                print(f"[planner] User text: {user_text}")
+                print(f"[planner] Selected skill: {llm_choice.skill_name}")
+                print(f"[planner] Arguments: {llm_choice.arguments}")
+                print(f"[planner] Confidence: {llm_choice.confidence}")
+                print(f"[planner] Reason: {llm_choice.reason}")
+                return llm_choice
+            print("[planner] LLM returned UNKNOWN; trying conversation fallback")
             print(f"[planner] Reason: {llm_choice.reason}")
-            return llm_choice
+
+        conversation_choice = self._conversation_choice(user_text)
+        if conversation_choice is not None:
+            print("[planner] Falling back to general conversation")
+            print(f"[planner] User text: {user_text}")
+            print(f"[planner] Selected skill: {conversation_choice.skill_name}")
+            return conversation_choice
 
         print("[planner] No skill matched")
         print(f"[planner] User text: {user_text}")
@@ -155,19 +165,37 @@ class CatalogSkillPlanner:
         if pose_choice is not None:
             return pose_choice
 
-        if "marker" not in normalized:
+        read_notes_choice = self._deterministic_read_notes_choice(user_text, normalized)
+        if read_notes_choice is not None:
+            return read_notes_choice
+
+        cleanup_choice = self._deterministic_table_cleanup_choice(normalized)
+        if cleanup_choice is not None:
+            return cleanup_choice
+
+        marker_object_terms = ("marker", "sharpie", "sharpy")
+        mentions_marker_object = any(term in normalized for term in marker_object_terms)
+        if not mentions_marker_object:
             visual_choice = self._deterministic_visual_question(user_text, normalized)
             if visual_choice is not None:
                 return visual_choice
             return None
 
         pick_words = ("pick", "grab", "fetch", "get")
-        place_words = ("place", "drop", "deliver", "move", "put")
+        place_words = ("place", "drop", "deliver", "move", "put", "remove", "clean", "clear")
         wants_pick = any(word in normalized for word in pick_words)
         wants_place = any(word in normalized for word in place_words)
         if not wants_pick and not wants_place:
             return self._deterministic_visual_question(user_text, normalized)
 
+        mentions_sharpie = "sharpie" in normalized or "sharpy" in normalized
+        if mentions_sharpie and self._can_use("pick_place_blue_marker"):
+            return SkillPlanChoice(
+                skill_name="pick_place_blue_marker",
+                arguments={},
+                confidence=0.95,
+                reason="Detected a request to pick up or remove the Sharpie; using the blue marker pick-and-place sequence.",
+            )
         if wants_place and self._can_use("pick_place_blue_marker"):
             return SkillPlanChoice(
                 skill_name="pick_place_blue_marker",
@@ -184,6 +212,32 @@ class CatalogSkillPlanner:
             )
         return self._deterministic_visual_question(user_text, normalized)
 
+    def _deterministic_table_cleanup_choice(self, normalized: str) -> SkillPlanChoice | None:
+        cleanup_words = ("clean", "cleanup", "clear", "tidy", "remove")
+        table_words = ("table", "desk", "workspace", "work surface")
+        if (
+            any(word in normalized for word in cleanup_words)
+            and any(word in normalized for word in table_words)
+            and self._can_use("pick_place_blue_marker")
+        ):
+            return SkillPlanChoice(
+                skill_name="pick_place_blue_marker",
+                arguments={},
+                confidence=0.9,
+                reason="Detected a table cleanup request; using the blue marker pick-and-place sequence.",
+            )
+        return None
+
+    def _conversation_choice(self, user_text: str) -> SkillPlanChoice | None:
+        if not self._can_use("general_conversation"):
+            return None
+        return SkillPlanChoice(
+            skill_name="general_conversation",
+            arguments={"question": user_text},
+            confidence=0.75,
+            reason="No specific skill matched, so using general conversation.",
+        )
+
     def _deterministic_visual_question(
         self,
         user_text: str,
@@ -198,6 +252,8 @@ class CatalogSkillPlanner:
             "see",
             "visible",
             "marker",
+            "sharpie",
+            "sharpy",
             "pen",
             "object",
             "cup",
@@ -215,6 +271,26 @@ class CatalogSkillPlanner:
                 arguments={"question": user_text},
                 confidence=0.9,
                 reason="Detected a visual question about the current scene.",
+            )
+        return None
+
+    def _deterministic_read_notes_choice(
+        self,
+        user_text: str,
+        normalized: str,
+    ) -> SkillPlanChoice | None:
+        note_words = ("note", "notes", "paper", "written", "writing", "text")
+        read_words = ("read", "say", "says", "written", "text", "transcribe")
+        if (
+            any(word in normalized for word in note_words)
+            and any(word in normalized for word in read_words)
+            and self._can_use("read_notes")
+        ):
+            return SkillPlanChoice(
+                skill_name="read_notes",
+                arguments={"user_text": user_text},
+                confidence=0.95,
+                reason="Detected a request to read visible notes.",
             )
         return None
 

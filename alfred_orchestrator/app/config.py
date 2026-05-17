@@ -49,16 +49,25 @@ class Settings:
             configs_dir=PROJECT_ROOT / "configs",
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-            openai_reasoning_model=os.getenv("OPENAI_REASONING_MODEL", "gpt-4.1-mini"),
-            openai_vision_model=os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini"),
+            openai_reasoning_model=os.getenv("OPENAI_REASONING_MODEL", "gpt-5.5"),
+            openai_vision_model=os.getenv("OPENAI_VISION_MODEL", "gpt-5.5"),
             elevenlabs_voice_id=os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
             elevenlabs_tts_model=os.getenv("ELEVENLABS_TTS_MODEL", "eleven_v3"),
             elevenlabs_output_format=os.getenv("ELEVENLABS_OUTPUT_FORMAT", "mp3_44100_128"),
-            elevenlabs_stt_model=os.getenv("ELEVENLABS_STT_MODEL", "scribe_v1"),
+            elevenlabs_stt_model=os.getenv("ELEVENLABS_STT_MODEL", "scribe_v2"),
             camera_id=int(os.getenv("ALFRED_CAMERA_ID", "0")),
             record_seconds=int(os.getenv("ALFRED_RECORD_SECONDS", "5")),
             enable_physical_skills=_bool_env("ALFRED_ENABLE_PHYSICAL_SKILLS", False),
         )
+
+    def print_model_configuration(self) -> None:
+        print("[settings] Model configuration")
+        print(f"[settings] OpenAI reasoning model: {self.openai_reasoning_model}")
+        print(f"[settings] OpenAI vision model: {self.openai_vision_model}")
+        print(f"[settings] ElevenLabs voice id: {self.elevenlabs_voice_id}")
+        print(f"[settings] ElevenLabs TTS model: {self.elevenlabs_tts_model}")
+        print(f"[settings] ElevenLabs output format: {self.elevenlabs_output_format}")
+        print(f"[settings] ElevenLabs STT model: {self.elevenlabs_stt_model}")
 
     def new_run_dir(self, prefix: str = "alfred_demo") -> Path:
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

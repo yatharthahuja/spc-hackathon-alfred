@@ -53,12 +53,14 @@ def test_runtime_borrows_shared_hardware_context(tmp_path):
 
     assert hardware.connect_calls == 1
     assert capture_skill.hardware is hardware
+    assert "general_conversation" in runtime.router.names()
     assert "answer_task_history" in runtime.router.names()
     assert "go_home" in runtime.router.names()
     assert "go_overlook" in runtime.router.names()
     assert "pick_blue_marker" in runtime.router.names()
     assert "pick_place_blue_marker" in runtime.router.names()
     assert "answer_scene_question" in runtime.router.names()
+    assert "read_notes" in runtime.router.names()
 
     runtime.close()
     assert hardware.close_calls == 0

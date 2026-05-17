@@ -30,7 +30,7 @@ class AlfredGuiApp:
 
         self.args = args
         self.api_key = load_env_value("ELEVENLABS_API_KEY")
-        self.stt_model = load_env_value("ELEVENLABS_STT_MODEL") or "scribe_v1"
+        self.stt_model = load_env_value("ELEVENLABS_STT_MODEL") or Settings.load().elevenlabs_stt_model
         self.camera_id = int(os.getenv("ALFRED_CAMERA_ID", "1"))
         self.recording_process: Optional[subprocess.Popen[bytes]] = None
         self.recording_started_at: Optional[float] = None

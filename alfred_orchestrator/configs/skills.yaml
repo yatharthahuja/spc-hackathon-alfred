@@ -48,6 +48,20 @@ skills:
       - what did you just do?
     enabled: true
 
+  general_conversation:
+    type: digital
+    description: Friendly general conversation and open-ended Q&A when no more specific robot, vision, or history skill is requested.
+    inputs: [question]
+    outputs: [answer_text, confidence, raw_response]
+    examples:
+      - hi Alfred
+      - how are you today?
+      - what is your name?
+      - what skills do you have?
+      - what is the capital of the USA?
+      - tell me a joke
+    enabled: true
+
   move_arm_noop:
     type: physical
     description: Placeholder arm motion skill that never moves hardware.
@@ -99,7 +113,7 @@ skills:
 
   pick_place_blue_marker:
     type: physical
-    description: Pick up the blue marker and place or drop it at the placement zone. If the user says marker without a color, treat it as the blue marker.
+    description: Pick up the blue marker and place or drop it at the placement zone. If the user says marker, Sharpie, or sharpy without a color, treat it as the blue marker. Also use this to remove the marker or clean up the table.
     inputs: []
     outputs: [trajectory_names, robot_move_attempted, robot_moved, message]
     trajectory_names: [pre_pick_marker, pick_marker, post_pick_marker, pre_place, drop_marker]
@@ -110,6 +124,11 @@ skills:
       - move the blue marker to the place location
       - pick and place the marker
       - drop the marker
+      - pick the sharpie
+      - pick the sharpy
+      - remove the marker from the table
+      - remove the sharpie from the table
+      - clean up the table
     enabled: true
 
   answer_scene_question:
@@ -123,4 +142,17 @@ skills:
       - how many markers are there?
       - is there a cup on the table?
       - do you see a blue marker?
+    enabled: true
+
+  read_notes:
+    type: vision
+    description: Move to the overlook pose, capture a wrist-camera image, read visible handwritten or printed notes, and tell the user what text is written.
+    inputs: [user_text]
+    outputs: [image_path, extracted_text, answer_text, confidence, raw_response]
+    examples:
+      - read my notes
+      - what do my notes say?
+      - read the note
+      - what text is written on the paper?
+      - tell me what is written in my notes
     enabled: true

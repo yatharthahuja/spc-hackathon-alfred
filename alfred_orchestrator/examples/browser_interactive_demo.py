@@ -281,7 +281,7 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     print(f"Saved captured image sent to VLM: {image_path}")
 
     print_step("2", "Sending audio to ElevenLabs speech-to-text")
-    stt_model = load_env_value("ELEVENLABS_STT_MODEL") or "scribe_v1"
+    stt_model = load_env_value("ELEVENLABS_STT_MODEL") or Settings.load().elevenlabs_stt_model
     transcript_payload = transcribe_audio(
         api_key=api_key,
         model_id=stt_model,

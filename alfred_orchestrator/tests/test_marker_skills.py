@@ -52,11 +52,13 @@ def test_marker_skills_are_declared_in_catalog():
     settings = Settings.load()
     catalog = SkillCatalog(settings.configs_dir / "skills.yaml")
 
+    assert catalog.get("general_conversation")["inputs"] == ["question"]
     assert catalog.get("go_home")["trajectory_names"] == GO_HOME_SEQUENCE
     assert catalog.get("go_overlook")["trajectory_names"] == GO_OVERLOOK_SEQUENCE
     assert catalog.get("pick_blue_marker")["trajectory_names"] == PICK_BLUE_MARKER_SEQUENCE
     assert catalog.get("pick_place_blue_marker")["trajectory_names"] == PICK_PLACE_BLUE_MARKER_SEQUENCE
     assert catalog.get("answer_scene_question")["inputs"] == ["question"]
+    assert catalog.get("read_notes")["inputs"] == ["user_text"]
 
 
 def test_pick_place_blue_marker_runs_pick_and_place_sequence():
