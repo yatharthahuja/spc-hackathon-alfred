@@ -926,6 +926,7 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     print_json_block("Final response object", final_response.model_dump(mode="json"))
     print(f"Alfred answer: {final_response.answer_text}")
     print(f"Response confidence: {final_response.confidence}")
+    runtime.record_task_history(request, plan, skill_results, completion, final_response)
 
     tts_audio_url: Optional[str] = None
     tts_audio_bytes: Optional[int] = None
@@ -1233,7 +1234,9 @@ def run_terminal_only(args: argparse.Namespace) -> int:
         intent_result = runtime.orchestrator.classify_intent(request.raw_text)
         plan = runtime.orchestrator.create_plan(request, intent_result)
         skill_results = runtime.executor.execute_plan(plan)
+        completion = runtime.orchestrator.evaluate_completion(request, skill_results)
         response = runtime.orchestrator.generate_final_answer(request, skill_results)
+        runtime.record_task_history(request, plan, skill_results, completion, response)
         print(f"Alfred answer: {response.answer_text}")
 
         if not args.no_speak:

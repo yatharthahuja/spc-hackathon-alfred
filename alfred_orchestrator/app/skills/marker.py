@@ -19,6 +19,8 @@ PICK_PLACE_BLUE_MARKER_SEQUENCE = [
     "pre_place",
     "drop_marker",
 ]
+GO_HOME_SEQUENCE = ["go_home"]
+GO_OVERLOOK_SEQUENCE = ["overlook"]
 
 
 class RobotTrajectorySkill(Skill):
@@ -57,3 +59,15 @@ class PickPlaceBlueMarkerSkill(RobotTrajectorySkill):
     name = "pick_place_blue_marker"
     trajectory_names = PICK_PLACE_BLUE_MARKER_SEQUENCE
     success_message = "Picked up and placed the blue marker."
+
+
+class GoHomeSkill(RobotTrajectorySkill):
+    name = "go_home"
+    trajectory_names = GO_HOME_SEQUENCE
+    success_message = "Moved to the home pose."
+
+
+class GoOverlookSkill(RobotTrajectorySkill):
+    name = "go_overlook"
+    trajectory_names = GO_OVERLOOK_SEQUENCE
+    success_message = "Moved to the overlook pose."

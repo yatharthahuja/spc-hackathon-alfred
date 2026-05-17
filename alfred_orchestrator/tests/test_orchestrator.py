@@ -85,6 +85,57 @@ def test_catalog_planner_maps_pick_blue_marker_variants(tmp_path):
         assert [call.skill_name for call in plan.skill_calls] == ["pick_blue_marker"]
 
 
+def test_catalog_planner_maps_robot_pose_variants(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    for text in [
+        "go home",
+        "return home",
+        "move home",
+        "go to home pose",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["go_home"]
+
+    for text in [
+        "go overlook",
+        "go to overlook",
+        "move to overlook",
+        "go to the overlook pose",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["go_overlook"]
+
+
+def test_catalog_planner_maps_task_history_questions(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    cases = [
+        ("what tasks have you done so far?", None),
+        ("tell me all tasks", None),
+        ("what was the last task?", 1),
+        ("what did you just do?", 1),
+        ("tell me the last 2 tasks", 2),
+    ]
+    for text, expected_limit in cases:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["answer_task_history"]
+        assert plan.skill_calls[0].arguments["question"] == text
+        assert plan.skill_calls[0].arguments["limit"] == expected_limit
+
+
 def test_catalog_planner_maps_pick_place_blue_marker_variants(tmp_path):
     orchestrator = _orchestrator_with_catalog_planner(tmp_path)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -146,6 +147,14 @@ class CatalogSkillPlanner:
 
     def _deterministic_choice(self, user_text: str) -> SkillPlanChoice | None:
         normalized = " ".join(user_text.lower().split())
+        history_choice = self._deterministic_history_choice(user_text, normalized)
+        if history_choice is not None:
+            return history_choice
+
+        pose_choice = self._deterministic_pose_choice(normalized)
+        if pose_choice is not None:
+            return pose_choice
+
         if "marker" not in normalized:
             visual_choice = self._deterministic_visual_question(user_text, normalized)
             if visual_choice is not None:
@@ -207,6 +216,72 @@ class CatalogSkillPlanner:
                 confidence=0.9,
                 reason="Detected a visual question about the current scene.",
             )
+        return None
+
+    def _deterministic_history_choice(
+        self,
+        user_text: str,
+        normalized: str,
+    ) -> SkillPlanChoice | None:
+        history_words = (
+            "task",
+            "tasks",
+            "done",
+            "history",
+            "what did you do",
+            "what have you done",
+            "what did you just do",
+        )
+        if not any(word in normalized for word in history_words):
+            return None
+        if not self._can_use("answer_task_history"):
+            return None
+
+        limit = None
+        last_match = re.search(r"\blast\s+(\d+)\s+tasks?\b", normalized)
+        if last_match:
+            limit = int(last_match.group(1))
+        elif re.search(r"\b(last task|last thing|just do|previous task)\b", normalized):
+            limit = 1
+
+        return SkillPlanChoice(
+            skill_name="answer_task_history",
+            arguments={"question": user_text, "limit": limit},
+            confidence=0.95,
+            reason="Detected a question about completed task history.",
+        )
+
+    def _deterministic_pose_choice(self, normalized: str) -> SkillPlanChoice | None:
+        home_phrases = (
+            "go home",
+            "return home",
+            "move home",
+            "go to home",
+            "home pose",
+        )
+        if any(phrase in normalized for phrase in home_phrases) and self._can_use("go_home"):
+            return SkillPlanChoice(
+                skill_name="go_home",
+                arguments={},
+                confidence=0.95,
+                reason="Detected a request to move to the home pose.",
+            )
+
+        overlook_phrases = (
+            "go overlook",
+            "go to overlook",
+            "move to overlook",
+            "overlook pose",
+            "look at the table",
+        )
+        if any(phrase in normalized for phrase in overlook_phrases) and self._can_use("go_overlook"):
+            return SkillPlanChoice(
+                skill_name="go_overlook",
+                arguments={},
+                confidence=0.95,
+                reason="Detected a request to move to the overlook pose.",
+            )
+
         return None
 
     def _can_use(self, skill_name: str) -> bool:

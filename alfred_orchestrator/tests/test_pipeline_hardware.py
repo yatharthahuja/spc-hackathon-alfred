@@ -4,6 +4,15 @@ from typing import Iterable
 
 from app.config import Settings
 from app.hardware.resources import RobotMoveResult, RobotSequenceResult
+from app.memory.session_memory import TASK_HISTORY
+from app.orchestrator.schemas import (
+    CompletionResult,
+    FinalResponse,
+    Intent,
+    OrchestratorPlan,
+    SkillCall,
+    SkillResult,
+)
 from app.pipeline import AlfredRuntime
 
 
@@ -44,9 +53,43 @@ def test_runtime_borrows_shared_hardware_context(tmp_path):
 
     assert hardware.connect_calls == 1
     assert capture_skill.hardware is hardware
+    assert "answer_task_history" in runtime.router.names()
+    assert "go_home" in runtime.router.names()
+    assert "go_overlook" in runtime.router.names()
     assert "pick_blue_marker" in runtime.router.names()
     assert "pick_place_blue_marker" in runtime.router.names()
     assert "answer_scene_question" in runtime.router.names()
 
     runtime.close()
     assert hardware.close_calls == 0
+
+
+def test_runtime_records_non_history_tasks_and_skips_history_queries(tmp_path):
+    TASK_HISTORY.clear()
+    settings = Settings.load()
+    runtime = AlfredRuntime(settings, run_dir=tmp_path, hardware_context=FakeHardwareContext())
+    request = runtime.orchestrator.classify_intent("go home")
+    user_request = runtime.handle_text("go home").request
+
+    assert request.intent
+    assert TASK_HISTORY.count() == 1
+    assert TASK_HISTORY.recent(1)[0]["user_text"] == "go home"
+
+    history_plan = OrchestratorPlan(
+        goal="what was the last task?",
+        intent=Intent.RUN_SKILL,
+        tasks=[],
+        skill_calls=[SkillCall(skill_name="answer_task_history", arguments={"question": "what was the last task?"})],
+        completion_criteria=[],
+    )
+    runtime.record_task_history(
+        user_request,
+        history_plan,
+        [SkillResult(skill_name="answer_task_history", status="success", output={"answer_text": "Go home."})],
+        CompletionResult(task_complete=True, reason="Answered history.", next_action="none"),
+        FinalResponse(task_complete=True, answer_text="Go home.", confidence=0.9),
+    )
+
+    assert TASK_HISTORY.count() == 1
+    runtime.close()
+    TASK_HISTORY.clear()

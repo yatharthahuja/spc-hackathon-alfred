@@ -11,17 +11,27 @@ from app.execution.safety import SafetyGate
 from app.execution.skill_router import SkillRouter
 from app.hardware.resources import HardwareContext
 from app.logs.event_logger import EventLogger
+from app.memory.session_memory import TASK_HISTORY
 from app.orchestrator.orchestrator import AlfredOrchestrator
 from app.orchestrator.prompt_registry import PromptRegistry
-from app.orchestrator.schemas import CompletionResult, FinalResponse, SkillCall, SkillResult, UserRequest
+from app.orchestrator.schemas import (
+    CompletionResult,
+    FinalResponse,
+    OrchestratorPlan,
+    SkillCall,
+    SkillResult,
+    UserRequest,
+    utc_now_iso,
+)
 from app.orchestrator.skill_planner import CatalogSkillPlanner
 from app.orchestrator.task_registry import SkillCatalog
 from app.skills.camera import CaptureWristCameraImageSkill
 from app.skills.arm_motion import MoveArmNoopSkill
 from app.skills.listen import ListenSkill
-from app.skills.marker import PickBlueMarkerSkill, PickPlaceBlueMarkerSkill
+from app.skills.marker import GoHomeSkill, GoOverlookSkill, PickBlueMarkerSkill, PickPlaceBlueMarkerSkill
 from app.skills.scene_qa import AnswerSceneQuestionSkill
 from app.skills.speech_to_text import SpeechToTextSkill
+from app.skills.task_history import AnswerTaskHistorySkill
 from app.skills.text_to_speech import TextToSpeechSkill
 from app.skills.vlm_describe import DescribeImageWithVLMSkill
 
@@ -99,6 +109,7 @@ class AlfredRuntime:
         skill_results = self.executor.execute_plan(plan)
         completion = self.orchestrator.evaluate_completion(request, skill_results)
         response = self.orchestrator.generate_final_answer(request, skill_results)
+        self.record_task_history(request, plan, skill_results, completion, response)
 
         if speak:
             speak_result = self.executor.execute(
@@ -134,6 +145,42 @@ class AlfredRuntime:
         user_text = str(stt_result.output["text"])
         return self.handle_text(text=user_text, input_type="voice", speak=speak)
 
+    def record_task_history(
+        self,
+        request: UserRequest,
+        plan: OrchestratorPlan,
+        skill_results: List[SkillResult],
+        completion: CompletionResult,
+        response: FinalResponse,
+    ) -> None:
+        if not skill_results:
+            return
+        if any(call.skill_name == "answer_task_history" for call in plan.skill_calls):
+            print("[memory] Skipping task-history query record.")
+            return
+
+        record = {
+            "timestamp": utc_now_iso(),
+            "request_id": request.request_id,
+            "input_type": request.input_type,
+            "user_text": request.raw_text,
+            "intent": plan.intent.value,
+            "goal": plan.goal,
+            "skill_names": [call.skill_name for call in plan.skill_calls],
+            "skill_statuses": {
+                result.skill_name: result.status
+                for result in skill_results
+            },
+            "task_complete": completion.task_complete,
+            "completion_reason": completion.reason,
+            "answer_text": response.answer_text,
+            "run_dir": str(self.run_dir),
+        }
+        TASK_HISTORY.add(record)
+        print("[memory] Recorded task history entry:")
+        print(record)
+        self.logger.write_json("task_history_record.json", record)
+
     def _build_router(self) -> SkillRouter:
         router = SkillRouter()
         router.register(ListenSkill(self.settings, self.run_dir))
@@ -146,8 +193,11 @@ class AlfredRuntime:
             )
         )
         router.register(DescribeImageWithVLMSkill(self.settings, self.prompts))
+        router.register(AnswerTaskHistorySkill(self.settings, self.prompts))
         router.register(TextToSpeechSkill(self.settings, self.run_dir))
         router.register(MoveArmNoopSkill())
+        router.register(GoHomeSkill(self.hardware))
+        router.register(GoOverlookSkill(self.hardware))
         router.register(PickBlueMarkerSkill(self.hardware))
         router.register(PickPlaceBlueMarkerSkill(self.hardware))
         router.register(

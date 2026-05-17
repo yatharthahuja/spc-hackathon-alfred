@@ -77,6 +77,18 @@ skill_planner:
     {available_skills}
 
     Examples:
+    User request: "go home"
+    JSON: {{"skill_name": "go_home", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked the robot to move to the home pose."}}
+
+    User request: "go overlook"
+    JSON: {{"skill_name": "go_overlook", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked the robot to move to the overlook pose."}}
+
+    User request: "what tasks have you done so far?"
+    JSON: {{"skill_name": "answer_task_history", "arguments": {{"question": "what tasks have you done so far?", "limit": null}}, "confidence": 0.95, "reason": "The user asked about Alfred's task history."}}
+
+    User request: "what were the last 2 tasks?"
+    JSON: {{"skill_name": "answer_task_history", "arguments": {{"question": "what were the last 2 tasks?", "limit": 2}}, "confidence": 0.95, "reason": "The user asked about the last two tasks."}}
+
     User request: "pick blue marker"
     JSON: {{"skill_name": "pick_blue_marker", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked to pick up the blue marker."}}
 
@@ -115,6 +127,38 @@ skill_planner:
       "reason": "..."
     }}
   few_shot_examples:
+    - input:
+        user_text: go home
+      output:
+        skill_name: go_home
+        arguments: {}
+        confidence: 0.95
+        reason: The user asked the robot to move to the home pose.
+    - input:
+        user_text: go overlook
+      output:
+        skill_name: go_overlook
+        arguments: {}
+        confidence: 0.95
+        reason: The user asked the robot to move to the overlook pose.
+    - input:
+        user_text: what tasks have you done so far?
+      output:
+        skill_name: answer_task_history
+        arguments:
+          question: what tasks have you done so far?
+          limit:
+        confidence: 0.95
+        reason: The user asked about Alfred's task history.
+    - input:
+        user_text: tell me the last 2 tasks
+      output:
+        skill_name: answer_task_history
+        arguments:
+          question: tell me the last 2 tasks
+          limit: 2
+        confidence: 0.95
+        reason: The user asked about the last two tasks.
     - input:
         user_text: pick blue marker
       output:
@@ -241,6 +285,57 @@ scene_qa_vlm:
         confidence: 0.75
         evidence: [two marker-shaped objects are visible]
         uncertainties: [small items near the edge are hard to identify]
+
+task_history_response:
+  role: Alfred task history assistant
+  task: Answer a user question about Alfred's completed task history.
+  context_fields:
+    - user_text
+    - task_history
+    - selected_task_count
+    - total_task_count
+  output_format:
+    type: json
+    schema:
+      answer_text: string
+      confidence: number
+  constraints:
+    - Return JSON only.
+    - Answer only from the task_history records.
+    - Be concise and suitable for TTS.
+    - If there is no task history, say that no tasks have been completed yet.
+  system_prompt: |
+    You are Alfred, a robot assistant summarizing your completed task history.
+
+    User asked:
+    "{user_text}"
+
+    Total completed task records available:
+    {total_task_count}
+
+    Task records included for this answer:
+    {selected_task_count}
+
+    Task history:
+    {task_history}
+
+    Return JSON only:
+    {{
+      "answer_text": "...",
+      "confidence": 0.0
+    }}
+
+    Summarize the relevant tasks in chronological order unless the user asks specifically for the last task.
+  few_shot_examples:
+    - input:
+        user_text: what was the last task?
+        task_history:
+          - user_text: go home
+            answer_text: Moved to the home pose.
+            skill_names: [go_home]
+      output:
+        answer_text: The last task was to go home, and I moved to the home pose.
+        confidence: 0.95
 
 response_generator:
   role: Alfred response generator

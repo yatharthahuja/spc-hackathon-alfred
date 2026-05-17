@@ -34,11 +34,52 @@ skills:
     outputs: [audio_path, audio_played]
     enabled: true
 
+  answer_task_history:
+    type: digital
+    description: Answer questions about tasks Alfred has completed so far in this server session.
+    inputs: [question, limit]
+    outputs: [answer_text, task_count, selected_task_count, raw_response]
+    examples:
+      - what tasks have you done so far?
+      - what have you done?
+      - tell me all tasks
+      - what was the last task?
+      - tell me the last 2 tasks
+      - what did you just do?
+    enabled: true
+
   move_arm_noop:
     type: physical
     description: Placeholder arm motion skill that never moves hardware.
     inputs: [pose_name]
     outputs: [pose_name, moved]
+    enabled: true
+
+  go_home:
+    type: physical
+    description: Move the robot arm to the saved go_home pose and stop there.
+    inputs: []
+    outputs: [trajectory_names, robot_move_attempted, robot_moved, message]
+    trajectory_names: [go_home]
+    examples:
+      - go home
+      - return home
+      - move home
+      - go to home pose
+    enabled: true
+
+  go_overlook:
+    type: physical
+    description: Move the robot arm to the saved overlook pose and stop there.
+    inputs: []
+    outputs: [trajectory_names, robot_move_attempted, robot_moved, message]
+    trajectory_names: [overlook]
+    examples:
+      - go overlook
+      - go to overlook
+      - move to overlook
+      - look at the table
+      - go to the overlook pose
     enabled: true
 
   pick_blue_marker:
