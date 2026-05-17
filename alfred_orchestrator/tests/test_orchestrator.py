@@ -211,6 +211,26 @@ def test_catalog_planner_maps_ordering_requests(tmp_path):
         assert plan.skill_calls[0].arguments["user_text"] == text
 
 
+def test_catalog_planner_maps_save_notes_requests(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    for text in [
+        "save my notes",
+        "save notes from the previous task",
+        "save the results from the last task to my notes",
+        "save all task outcomes as notes",
+        "take notes about what you just did",
+        "write down the experiment result",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["save_notes"]
+        assert plan.skill_calls[0].arguments["user_text"] == text
+
+
 def test_catalog_planner_maps_compound_skill_sequences(tmp_path):
     orchestrator = _orchestrator_with_catalog_planner(tmp_path)
 

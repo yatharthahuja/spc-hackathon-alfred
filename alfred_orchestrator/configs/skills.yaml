@@ -160,6 +160,20 @@ skills:
       - purchase groceries for me
     enabled: true
 
+  save_notes:
+    type: digital
+    description: Save notes from previous task outcomes in this session to a text file, using the user's request to decide whether to save all, recent, or last task results.
+    inputs: [user_text, filename]
+    outputs: [notes_file, saved_record_count, notes_text, message]
+    examples:
+      - save my notes
+      - save notes from the previous task
+      - save the results from the last task to my notes
+      - save all task outcomes as notes
+      - take notes about what you just did
+      - write down the experiment result
+    enabled: true
+
   answer_scene_question:
     type: vision
     description: Move to the overlook pose, capture a wrist-camera image, and answer a user question about the visible scene.

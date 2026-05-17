@@ -321,6 +321,10 @@ class CatalogSkillPlanner:
 
     def _deterministic_choice(self, user_text: str) -> SkillPlanChoice | None:
         normalized = " ".join(user_text.lower().split())
+        save_notes_choice = self._deterministic_save_notes_choice(user_text, normalized)
+        if save_notes_choice is not None:
+            return save_notes_choice
+
         history_choice = self._deterministic_history_choice(user_text, normalized)
         if history_choice is not None:
             return history_choice
@@ -525,6 +529,33 @@ class CatalogSkillPlanner:
                 reason="Detected a request to read visible notes.",
             )
         return None
+
+    def _deterministic_save_notes_choice(
+        self,
+        user_text: str,
+        normalized: str,
+    ) -> SkillPlanChoice | None:
+        if not self._can_use("save_notes"):
+            return None
+
+        note_words = ("note", "notes", "write down", "save")
+        save_words = ("save", "record", "write down", "take notes", "note down")
+        outcome_words = ("result", "results", "outcome", "outcomes", "task", "tasks", "did")
+        asks_to_save_notes = any(word in normalized for word in note_words) and any(
+            word in normalized for word in save_words
+        )
+        asks_to_save_outcome = "save" in normalized and any(
+            word in normalized for word in outcome_words
+        )
+        if not asks_to_save_notes and not asks_to_save_outcome:
+            return None
+
+        return SkillPlanChoice(
+            skill_name="save_notes",
+            arguments={"user_text": user_text},
+            confidence=0.95,
+            reason="Detected a request to save notes from previous task outcomes.",
+        )
 
     def _deterministic_history_choice(
         self,

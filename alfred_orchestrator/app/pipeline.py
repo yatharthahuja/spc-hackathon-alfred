@@ -40,6 +40,7 @@ from app.skills.marker import (
 )
 from app.skills.ordering import OrderingSkill
 from app.skills.read_notes import ReadNotesSkill
+from app.skills.save_notes import SaveNotesSkill
 from app.skills.scene_qa import AnswerSceneQuestionSkill
 from app.skills.speech_to_text import SpeechToTextSkill
 from app.skills.task_history import AnswerTaskHistorySkill
@@ -296,6 +297,7 @@ class AlfredRuntime:
         router.register(PickPlaceBlueMarkerSkill(self.hardware))
         router.register(EnzymeExperimentsSkill(self.hardware))
         router.register(OrderingSkill())
+        router.register(SaveNotesSkill(self.run_dir))
         router.register(
             ReadNotesSkill(
                 self.settings,

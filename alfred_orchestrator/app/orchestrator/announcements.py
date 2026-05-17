@@ -35,6 +35,8 @@ def start_announcement(user_text: str, skill_name: str) -> str | None:
         return "Getting that for you now, my friend."
     if skill_name == "read_notes":
         return "Reading your notes for you now."
+    if skill_name == "save_notes":
+        return "Saving your notes for you now."
     if skill_name in {"answer_scene_question", "capture_wrist_camera_image"}:
         return "Taking a look for you now."
     if skill_name == "go_home":
@@ -71,6 +73,8 @@ def completion_announcement(
         return "Marker picked up with pleasure."
     if primary_skill == "ordering":
         return "Done, I sent the order signal for you."
+    if primary_skill == "save_notes":
+        return "Done, I saved your notes."
     if primary_skill == "go_home":
         return "Home pose completed."
     if primary_skill == "go_overlook":

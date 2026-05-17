@@ -117,6 +117,12 @@ skill_planner:
     User request: "order something for me"
     JSON: {{"skill_calls": [{{"skill_name": "ordering", "arguments": {{"user_text": "order something for me"}}, "confidence": 0.95, "reason": "The user asked Alfred to order something, so signal the ordering system."}}], "confidence": 0.95, "reason": "The user requested an ordering action."}}
 
+    User request: "save my notes"
+    JSON: {{"skill_calls": [{{"skill_name": "save_notes", "arguments": {{"user_text": "save my notes"}}, "confidence": 0.95, "reason": "The user asked Alfred to save notes from previous task outcomes."}}], "confidence": 0.95, "reason": "The user requested note saving."}}
+
+    User request: "save the results from the last task to my notes"
+    JSON: {{"skill_calls": [{{"skill_name": "save_notes", "arguments": {{"user_text": "save the results from the last task to my notes"}}, "confidence": 0.95, "reason": "The user asked Alfred to save the previous task result as notes."}}], "confidence": 0.95, "reason": "The user requested note saving."}}
+
     User request: "Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy"
     JSON: {{"skill_calls": [{{"skill_name": "pick_place_blue_marker", "arguments": {{}}, "confidence": 0.9, "reason": "First clean the table by removing the marker."}}, {{"skill_name": "read_notes", "arguments": {{"user_text": "Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy"}}, "confidence": 0.95, "reason": "Then read the notes and answer the user's shopping-list question from the note text."}}], "confidence": 0.9, "reason": "The user requested cleanup followed by contextual note reading."}}
 
@@ -325,6 +331,28 @@ skill_planner:
             reason: The user asked Alfred to order something, so signal the ordering system.
         confidence: 0.95
         reason: The user requested an ordering action.
+    - input:
+        user_text: save my notes
+      output:
+        skill_calls:
+          - skill_name: save_notes
+            arguments:
+              user_text: save my notes
+            confidence: 0.95
+            reason: The user asked Alfred to save notes from previous task outcomes.
+        confidence: 0.95
+        reason: The user requested note saving.
+    - input:
+        user_text: save the results from the last task to my notes
+      output:
+        skill_calls:
+          - skill_name: save_notes
+            arguments:
+              user_text: save the results from the last task to my notes
+            confidence: 0.95
+            reason: The user asked Alfred to save the previous task result as notes.
+        confidence: 0.95
+        reason: The user requested note saving.
     - input:
         user_text: Hi Alfred, clean the table and after it is clean read my notes, in my notes I have what I need to buy, so tell me what I need to buy
       output:
