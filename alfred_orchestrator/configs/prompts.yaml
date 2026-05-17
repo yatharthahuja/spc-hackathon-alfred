@@ -72,6 +72,7 @@ skill_planner:
     - Only choose a skill listed in Available skills.
     - Accept user requests in any language.
     - Preserve the user's original language and wording in user_text/question arguments whenever possible.
+    - Never schedule amazon_add_to_cart in the same plan as amazon_search. amazon_add_to_cart requires explicit user confirmation in a separate turn — if the user says "search for X and add it to my cart", produce only [amazon_search] and explain in the reason that confirmation will be requested.
   system_prompt: |
     You are Alfred, a robot task planner.
 
@@ -378,6 +379,17 @@ skill_planner:
           question: how are you today?
         confidence: 0.8
         reason: The user started a general conversation.
+    - input:
+        user_text: find apples on amazon and add them to my cart
+      output:
+        skill_calls:
+          - skill_name: amazon_search
+            arguments:
+              query: apples
+            confidence: 0.9
+            reason: will confirm with user before adding to cart
+        confidence: 0.9
+        reason: amazon_add_to_cart requires explicit confirmation in a separate turn; only schedule the search.
 
 desk_vlm:
   role: Robot vision assistant

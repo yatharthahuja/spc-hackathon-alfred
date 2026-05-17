@@ -27,6 +27,7 @@ from app.orchestrator.schemas import (
 )
 from app.orchestrator.skill_planner import CatalogSkillPlanner
 from app.orchestrator.task_registry import SkillCatalog
+from app.skills.amazon import AmazonAddToCartSkill, AmazonSearchSkill
 from app.skills.camera import CaptureWristCameraImageSkill
 from app.skills.arm_motion import MoveArmNoopSkill
 from app.skills.conversation import GeneralConversationSkill
@@ -312,4 +313,6 @@ class AlfredRuntime:
                 self.hardware,
             )
         )
+        router.register(AmazonSearchSkill(self.settings))
+        router.register(AmazonAddToCartSkill(self.settings))
         return router

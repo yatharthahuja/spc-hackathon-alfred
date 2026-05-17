@@ -185,3 +185,44 @@ skills:
       - what text is written on the paper?
       - tell me what is written in my notes
     enabled: true
+
+  amazon_search:
+    type: digital
+    description: Search Amazon for a product and return the top organic result with price, rating, and key features.
+    inputs: [query, max_price]
+    outputs: [asin, title, price_text, price, rating, reviews, feature_summary, thumbnail_url, product_url, answer_text]
+    examples:
+      - find me organic apples on amazon
+      - search amazon for sony headphones
+      - look up a usb-c hub
+      - what's the best blender on amazon
+      - find organic coffee under twenty dollars
+      - I need to order milk on amazon
+      - search for an air fryer
+      - buy paper towels
+      - find a phone charger on amazon
+      - look up bluetooth speakers under fifty bucks
+      - order me some dish soap
+      - shop for running shoes
+      - find lego sets for kids
+      - what's a good standing desk on amazon
+      - amazon search wireless mouse
+    enabled: true
+
+  amazon_add_to_cart:
+    type: digital
+    description: Add the most recently searched Amazon product to the user's cart. Opens a browser tab for the user to confirm. Only run AFTER amazon_search in a separate turn — never in the same plan.
+    inputs: [quantity]
+    outputs: [cart_url, asin, quantity, browser_opened, title, answer_text]
+    examples:
+      - yes add it to my cart
+      - yeah go ahead
+      - add it
+      - add to cart
+      - yep buy it
+      - sounds good add it
+      - confirm add to cart
+      - yes just one
+      - add two of those
+      - put it in the cart
+    enabled: true

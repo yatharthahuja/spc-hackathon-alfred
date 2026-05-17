@@ -12,3 +12,5 @@ elevenlabs
 pytest
 motorbridge
 pinocchio
+playwright>=1.40
+browser-cookie3>=0.19

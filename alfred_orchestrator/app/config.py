@@ -27,6 +27,8 @@ class Settings:
     configs_dir: Path
     openai_api_key: str
     elevenlabs_api_key: str
+    serpapi_key: str
+    amazon_associates_tag: str
     openai_reasoning_model: str
     openai_vision_model: str
     elevenlabs_voice_id: str
@@ -49,6 +51,8 @@ class Settings:
             configs_dir=PROJECT_ROOT / "configs",
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+            serpapi_key=os.getenv("SERPAPI_KEY", ""),
+            amazon_associates_tag=os.getenv("AMAZON_ASSOCIATES_TAG", "sebilee2026-20"),
             openai_reasoning_model=os.getenv("OPENAI_REASONING_MODEL", "gpt-5.5"),
             openai_vision_model=os.getenv("OPENAI_VISION_MODEL", "gpt-5.5"),
             elevenlabs_voice_id=os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
