@@ -48,6 +48,18 @@ skills:
       - what did you just do?
     enabled: true
 
+  amazon_search:
+    type: digital
+    description: Search Amazon and report the top product match (title, price, link). Does not place orders.
+    inputs: [query, user_text]
+    outputs: [query, asin, title, product_url, price_display, answer_text]
+    examples:
+      - order apples on Amazon
+      - find wireless earbuds on amazon
+      - search for AA batteries on amazon
+      - what's the top result for organic coffee on amazon
+    enabled: true
+
   general_conversation:
     type: digital
     description: Friendly general conversation and open-ended Q&A when no more specific robot, vision, or history skill is requested.

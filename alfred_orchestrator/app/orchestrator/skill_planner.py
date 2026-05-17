@@ -222,23 +222,29 @@ class CatalogSkillPlanner:
 
     def _deterministic_sequence(self, user_text: str) -> SkillPlanSequence | None:
         clauses = self._split_compound_requests(user_text)
-        if len(clauses) <= 1:
-            choice = self._deterministic_choice(user_text)
-            if choice is None:
-                return None
-            return SkillPlanSequence(
-                choices=[choice],
-                confidence=choice.confidence,
-                reason=choice.reason,
-            )
+        if len(clauses) > 1:
+            compound = self._sequence_from_clauses(clauses)
+            if compound is not None:
+                return compound
+            # STT often appends filler ("yeah, sure") after "and"; treat as one request.
+            clauses = [user_text.strip()]
 
+        choice = self._deterministic_choice(clauses[0] if clauses else user_text)
+        if choice is None:
+            return None
+        return SkillPlanSequence(
+            choices=[choice],
+            confidence=choice.confidence,
+            reason=choice.reason,
+        )
+
+    def _sequence_from_clauses(self, clauses: list[str]) -> SkillPlanSequence | None:
         choices = []
         for clause in clauses:
             choice = self._deterministic_choice(clause)
             if choice is None or choice.is_unknown:
                 return None
             choices.append(choice)
-
         return SkillPlanSequence(
             choices=choices,
             confidence=min(choice.confidence for choice in choices),
@@ -288,6 +294,10 @@ class CatalogSkillPlanner:
         history_choice = self._deterministic_history_choice(user_text, normalized)
         if history_choice is not None:
             return history_choice
+
+        amazon_choice = self._deterministic_amazon_search_choice(user_text, normalized)
+        if amazon_choice is not None:
+            return amazon_choice
 
         pose_choice = self._deterministic_pose_choice(normalized)
         if pose_choice is not None:
@@ -484,6 +494,34 @@ class CatalogSkillPlanner:
             arguments={"question": user_text, "limit": limit},
             confidence=0.95,
             reason="Detected a question about completed task history.",
+        )
+
+    def _deterministic_amazon_search_choice(
+        self,
+        user_text: str,
+        normalized: str,
+    ) -> SkillPlanChoice | None:
+        if not self._can_use("amazon_search"):
+            return None
+
+        from app.skills.amazon_search import extract_product_query
+
+        commerce_words = ("order", "buy", "find", "search", "get", "purchase", "look")
+        if "amazon" not in normalized:
+            return None
+        if not any(word in normalized for word in commerce_words):
+            return None
+
+        query = extract_product_query(user_text)
+        arguments: dict[str, Any] = {"user_text": user_text}
+        if query:
+            arguments["query"] = query
+
+        return SkillPlanChoice(
+            skill_name="amazon_search",
+            arguments=arguments,
+            confidence=0.95,
+            reason="Detected a request to search Amazon and report the top result.",
         )
 
     def _deterministic_pose_choice(self, normalized: str) -> SkillPlanChoice | None:

@@ -73,7 +73,8 @@ skill_planner:
 
     Select one or more enabled skills that best satisfy the user request.
     If the user asks for multiple tasks, create a skill_calls list in the exact order requested.
-    Prefer specific robot, vision, note-reading, or history skills when they apply.
+    Prefer specific robot, vision, note-reading, Amazon search, or history skills when they apply.
+    Use amazon_search when the user wants to find or order something on Amazon (report top result only).
     For greetings, general conversation, general knowledge, capability questions, or open-ended requests, choose "general_conversation".
     If no listed skill is a good match and general_conversation is unavailable, use skill_name "UNKNOWN".
 
@@ -149,6 +150,9 @@ skill_planner:
 
     User request: "what do my notes say?"
     JSON: {{"skill_name": "read_notes", "arguments": {{"user_text": "what do my notes say?"}}, "confidence": 0.95, "reason": "The user asked what text is written in the notes."}}
+
+    User request: "order apples on Amazon"
+    JSON: {{"skill_calls": [{{"skill_name": "amazon_search", "arguments": {{"query": "apples", "user_text": "order apples on Amazon"}}, "confidence": 0.95, "reason": "The user asked for the top Amazon search result."}}], "confidence": 0.95, "reason": "The user asked for the top Amazon search result."}}
 
     User request: "hi Alfred"
     JSON: {{"skill_name": "general_conversation", "arguments": {{"question": "hi Alfred"}}, "confidence": 0.8, "reason": "The user started a general conversation."}}

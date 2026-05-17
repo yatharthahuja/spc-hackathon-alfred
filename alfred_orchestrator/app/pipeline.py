@@ -27,6 +27,7 @@ from app.orchestrator.skill_planner import CatalogSkillPlanner
 from app.orchestrator.task_registry import SkillCatalog
 from app.skills.camera import CaptureWristCameraImageSkill
 from app.skills.arm_motion import MoveArmNoopSkill
+from app.skills.amazon_search import AmazonSearchSkill
 from app.skills.conversation import GeneralConversationSkill
 from app.skills.listen import ListenSkill
 from app.skills.marker import (
@@ -204,6 +205,7 @@ class AlfredRuntime:
         router.register(DescribeImageWithVLMSkill(self.settings, self.prompts))
         router.register(AnswerTaskHistorySkill(self.settings, self.prompts))
         router.register(GeneralConversationSkill(self.settings, self.prompts, self.catalog))
+        router.register(AmazonSearchSkill(self.settings))
         router.register(TextToSpeechSkill(self.settings, self.run_dir))
         router.register(MoveArmNoopSkill())
         router.register(GoHomeSkill(self.hardware))

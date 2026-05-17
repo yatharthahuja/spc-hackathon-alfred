@@ -36,6 +36,18 @@ class Settings:
     camera_id: int
     record_seconds: int
     enable_physical_skills: bool
+    amazon_use_mock: bool
+    amazon_access_key: str
+    amazon_secret_key: str
+    amazon_partner_tag: str
+    amazon_host: str
+    amazon_region: str
+    amazon_marketplace: str
+    amazon_search_index: str
+
+    @property
+    def amazon_paapi_ready(self) -> bool:
+        return bool(self.amazon_access_key and self.amazon_secret_key and self.amazon_partner_tag)
 
     @classmethod
     def load(cls) -> "Settings":
@@ -58,6 +70,16 @@ class Settings:
             camera_id=int(os.getenv("ALFRED_CAMERA_ID", "0")),
             record_seconds=int(os.getenv("ALFRED_RECORD_SECONDS", "5")),
             enable_physical_skills=_bool_env("ALFRED_ENABLE_PHYSICAL_SKILLS", False),
+            amazon_use_mock=_bool_env("AMAZON_USE_MOCK", True),
+            amazon_access_key=os.getenv("AMAZON_ACCESS_KEY", ""),
+            amazon_secret_key=os.getenv("AMAZON_SECRET_KEY", ""),
+            amazon_partner_tag=os.getenv("AMAZON_PARTNER_TAG", ""),
+            amazon_host=os.getenv("AMAZON_PAAPI_HOST")
+            or os.getenv("AMAZON_HOST", "webservices.amazon.com"),
+            amazon_region=os.getenv("AMAZON_PAAPI_REGION")
+            or os.getenv("AMAZON_REGION", "us-east-1"),
+            amazon_marketplace=os.getenv("AMAZON_MARKETPLACE", "www.amazon.com"),
+            amazon_search_index=os.getenv("AMAZON_SEARCH_INDEX", "All"),
         )
 
     def print_model_configuration(self) -> None:
