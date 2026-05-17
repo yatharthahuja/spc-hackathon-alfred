@@ -23,6 +23,21 @@ def test_rules_first_describe_desk_plan(tmp_path):
     assert plan.skill_calls[1].skill_name == "describe_image_with_vlm"
 
 
+def test_rules_first_describe_desk_matches_natural_variants(tmp_path):
+    settings = Settings.load()
+    logger = EventLogger(tmp_path, "test-request")
+    catalog = SkillCatalog(settings.configs_dir / "skills.yaml")
+    orchestrator = AlfredOrchestrator(catalog, logger)
+
+    for text in [
+        "Can you look at my workspace?",
+        "What can you see?",
+        "Describe the table please",
+        "Inspect the work surface",
+    ]:
+        assert orchestrator.classify_intent(text).intent == Intent.DESCRIBE_DESK
+
+
 def test_unknown_intent_has_no_skill_calls(tmp_path):
     settings = Settings.load()
     logger = EventLogger(tmp_path, "test-request")

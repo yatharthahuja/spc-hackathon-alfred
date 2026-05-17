@@ -23,35 +23,35 @@ def main() -> None:
     args = parse_args()
     console = Console()
     settings = Settings.load()
-    runtime = AlfredRuntime(settings)
 
-    console.print(Panel.fit("Alfred is ready.", title="Alfred"))
+    with AlfredRuntime(settings) as runtime:
+        console.print(Panel.fit("Alfred is ready.", title="Alfred"))
 
-    if args.text:
-        result = runtime.handle_text(args.text, speak=args.speak)
-        _print_result(console, result)
-        return
-
-    while True:
-        try:
-            if args.mode == "voice":
-                input("Press Enter, then ask Alfred a question...")
-                result = runtime.handle_voice(
-                    seconds=args.seconds,
-                    speak=not args.no_speak,
-                )
-            else:
-                text = input("Ask Alfred (or 'quit'): ").strip()
-                if text.lower() in {"q", "quit", "exit"}:
-                    break
-                result = runtime.handle_text(text, speak=args.speak)
-
+        if args.text:
+            result = runtime.handle_text(args.text, speak=args.speak)
             _print_result(console, result)
-        except KeyboardInterrupt:
-            console.print("\nGoodbye.")
-            break
-        except Exception as exc:
-            console.print(f"[red]Error:[/red] {exc}")
+            return
+
+        while True:
+            try:
+                if args.mode == "voice":
+                    input("Press Enter, then ask Alfred a question...")
+                    result = runtime.handle_voice(
+                        seconds=args.seconds,
+                        speak=not args.no_speak,
+                    )
+                else:
+                    text = input("Ask Alfred (or 'quit'): ").strip()
+                    if text.lower() in {"q", "quit", "exit"}:
+                        break
+                    result = runtime.handle_text(text, speak=args.speak)
+
+                _print_result(console, result)
+            except KeyboardInterrupt:
+                console.print("\nGoodbye.")
+                break
+            except Exception as exc:
+                console.print(f"[red]Error:[/red] {exc}")
 
 
 def _print_result(console: Console, result) -> None:

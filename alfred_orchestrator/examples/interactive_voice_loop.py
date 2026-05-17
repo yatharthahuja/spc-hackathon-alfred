@@ -1,13 +1,16 @@
 """Alfred interactive voice loop, phone-accessible.
 
-This script is the same browser-based demo as before (3-column UI with live
-browser camera preview, the captured image sent to the VLM, and a debug log).
-The only thing that changed is that the server now listens over HTTPS on
-``0.0.0.0`` by default, with an auto-generated self-signed certificate, so
-the page can be opened from a phone on the LAN and the **phone's microphone**
-will be the audio source — browsers refuse ``getUserMedia`` on non-secure
-origins, which is the only reason the page couldn't be used from a phone
-before.
+This script serves a browser UI that uses a phone or laptop microphone for
+voice input while the Python server drives the host-side wrist camera. Desk
+inspection requests run the real Alfred pipeline: move the robot to the
+overlook pose, capture a wrist-camera image, send it to the VLM, and return
+the model output in the debug panel.
+
+The server listens over HTTPS on ``0.0.0.0`` by default, with an auto-generated
+self-signed certificate, so the page can be opened from a phone on the LAN and
+the **phone's microphone** will be the audio source — browsers refuse
+``getUserMedia`` on non-secure origins, which is the only reason the page
+couldn't be used from a phone before.
 
 The TTS response is also streamed back as bytes inside the JSON response so
 the phone plays it through the phone's speakers; this sidesteps the Ubuntu
@@ -39,12 +42,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
-import cv2
 from collections import OrderedDict
 
 from app.config import Settings
+from app.hardware.resources import HardwareContext
 from app.interfaces.camera import detect_cameras
-from app.orchestrator.schemas import SkillCall, SkillResult, UserRequest
+from app.orchestrator.schemas import SkillCall, UserRequest
 from app.pipeline import AlfredRuntime
 from test_elevenlabs_api import load_env_value, synthesize_speech, transcribe_audio
 
@@ -143,11 +146,11 @@ HTML = r"""<!doctype html>
   <div id="insecureBanner" class="banner"></div>
   <main>
     <section>
-      <h2>Live Host Camera</h2>
+      <h2>Live Wrist Camera</h2>
       <img id="livePreview" alt="Live host camera will appear here" />
     </section>
     <section>
-      <h2>Captured Image Sent To VLM</h2>
+      <h2>Captured Wrist Image Sent To VLM</h2>
       <img id="capturedImage" alt="Captured frame will appear here" />
     </section>
     <section>
@@ -176,6 +179,7 @@ HTML = r"""<!doctype html>
     let mediaStream = null;
     let recorder = null;
     let chunks = [];
+    let recordingStartedAt = 0;
 
     function log(message) {
       console.log(message);
@@ -257,6 +261,10 @@ HTML = r"""<!doctype html>
       }
       // Cache-bust so changing camera_id always forces a fresh MJPEG stream.
       livePreview.src = `/api/stream?camera_id=${encodeURIComponent(id)}&_=${Date.now()}`;
+    }
+
+    function stopHostPreview() {
+      livePreview.removeAttribute("src");
     }
 
     async function populateMics() {
@@ -372,6 +380,7 @@ HTML = r"""<!doctype html>
           if (event.data && event.data.size > 0) chunks.push(event.data);
         };
         recorder.start();
+        recordingStartedAt = Date.now();
         startBtn.disabled = true;
         stopBtn.disabled = false;
         setStatus("Recording... speak your request, then click Stop Recording + Process.");
@@ -385,12 +394,20 @@ HTML = r"""<!doctype html>
       stopBtn.disabled = true;
       setStatus("Stopping recording...");
       unlockAudioElement();
-      recorder.stop();
       recorder.onstop = async () => {
         try {
           const audioBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+          const recordedSeconds = recordingStartedAt ? ((Date.now() - recordingStartedAt) / 1000) : 0;
+          log(`Recorded audio: ${audioBlob.size} bytes over ${recordedSeconds.toFixed(1)} seconds.`);
+          if (audioBlob.size < 4096) {
+            throw new Error(
+              "Browser microphone recorded almost no audio. Refresh the page, choose the working mic, "
+              + "then record for a few seconds while speaking clearly."
+            );
+          }
           const audioDataUrl = await blobToDataUrl(audioBlob);
           const cameraId = cameraSelect.value === "" ? null : Number(cameraSelect.value);
+          stopHostPreview();
           setStatus("Sending audio to Alfred server...");
           const response = await fetch("/api/process", {
             method: "POST",
@@ -399,6 +416,7 @@ HTML = r"""<!doctype html>
               audio_data_url: audioDataUrl,
               camera_id: cameraId,
               speak: speakToggle.checked,
+              require_robot_move: true,
             }),
           });
           const payload = await response.json();
@@ -409,6 +427,12 @@ HTML = r"""<!doctype html>
           log("Task complete: " + payload.task_complete);
           log("Alfred: " + payload.answer_text);
           log("Run artifacts: " + payload.run_dir);
+          if (payload.robot_move) {
+            log("Robot move: " + JSON.stringify(payload.robot_move, null, 2));
+          }
+          if (payload.vlm_output) {
+            log("VLM output: " + JSON.stringify(payload.vlm_output, null, 2));
+          }
           if (payload.captured_image_data_url) {
             capturedImage.src = payload.captured_image_data_url;
           }
@@ -435,9 +459,11 @@ HTML = r"""<!doctype html>
           log("Error: " + error.message);
           setStatus("Failed. See debug output.");
         } finally {
+          startHostPreview();
           startBtn.disabled = false;
         }
       };
+      recorder.stop();
     };
 
     cameraSelect.onchange = startHostPreview;
@@ -535,69 +561,37 @@ def _ensure_self_signed_cert(extra_ips: List[str]) -> Tuple[Path, Path]:
 
 # ──────────────────────────────────────────────────────────────────────
 # Host camera streaming (so the browser can list + preview the host's
-# cameras instead of the client's). All access goes through a single
-# CameraStreamer with a re-entrant lock — cv2.VideoCapture is not safe
-# for concurrent reads on the same device.
+# cameras instead of the client's). Camera access delegates to the shared
+# HardwareContext so preview and skill capture use one VideoCapture owner.
 # ──────────────────────────────────────────────────────────────────────
 
 
+_HARDWARE_CONTEXT: Optional[HardwareContext] = None
+
+
+def get_hardware_context() -> HardwareContext:
+    global _HARDWARE_CONTEXT
+    if _HARDWARE_CONTEXT is None:
+        settings = Settings.load()
+        _HARDWARE_CONTEXT = HardwareContext.from_settings(settings)
+        _HARDWARE_CONTEXT.connect()
+    return _HARDWARE_CONTEXT
+
+
 class CameraStreamer:
-    """Lazily-opened, single-camera streamer shared by /api/stream and /api/process.
-
-    cv2.VideoCapture devices are scarce (a USB cam usually only allows one
-    open handle) so we keep at most one open. Switching ``camera_id``
-    releases the previous device and reopens the new one. All public methods
-    are guarded by a re-entrant lock so MJPEG streaming threads and the
-    /api/process capture thread don't trample on each other.
-    """
-
-    def __init__(self) -> None:
-        self._cap: Optional[cv2.VideoCapture] = None
-        self._camera_id: Optional[int] = None
-        self._lock = threading.RLock()
-        self._last_jpeg: Optional[bytes] = None
-
-    def _ensure_open(self, camera_id: int) -> cv2.VideoCapture:
-        if self._cap is None or self._camera_id != camera_id:
-            if self._cap is not None:
-                self._cap.release()
-            cap = cv2.VideoCapture(camera_id)
-            if not cap.isOpened():
-                cap.release()
-                raise RuntimeError(f"Could not open host camera {camera_id}")
-            self._cap = cap
-            self._camera_id = camera_id
-            self._last_jpeg = None
-        return self._cap  # type: ignore[return-value]
+    """Compatibility wrapper around the server-lifetime camera resource."""
 
     def grab_jpeg(self, camera_id: int, quality: int = 80) -> bytes:
-        """Read one frame and JPEG-encode it. Raises if the device fails."""
-        with self._lock:
-            cap = self._ensure_open(camera_id)
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                raise RuntimeError(f"Failed to read frame from camera {camera_id}")
-            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
-            if not ok:
-                raise RuntimeError("cv2.imencode failed for camera frame")
-            jpeg = bytes(buf)
-            self._last_jpeg = jpeg
-            return jpeg
+        return get_hardware_context().camera.grab_jpeg(camera_id, quality=quality)
 
     def capture_to_file(self, camera_id: int, path: Path, quality: int = 92) -> Path:
-        with self._lock:
-            jpeg = self.grab_jpeg(camera_id, quality=quality)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(jpeg)
-            return path
+        jpeg = self.grab_jpeg(camera_id, quality=quality)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(jpeg)
+        return path
 
     def release(self) -> None:
-        with self._lock:
-            if self._cap is not None:
-                self._cap.release()
-                self._cap = None
-                self._camera_id = None
-                self._last_jpeg = None
+        get_hardware_context().camera.close()
 
 
 CAMERAS = CameraStreamer()
@@ -783,17 +777,27 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
             camera_id = int(raw_camera_id)
         except (TypeError, ValueError):
             camera_id = settings.camera_id
+    raw_require_robot_move = payload.get("require_robot_move", True)
+    require_robot_move = (
+        raw_require_robot_move
+        if isinstance(raw_require_robot_move, bool)
+        else str(raw_require_robot_move).strip().lower() not in {"0", "false", "no", "off"}
+    )
 
     print_header("Browser Demo Request")
-    print_step("1", "Saving browser audio and capturing host camera frame")
+    print_step("1", "Saving browser audio")
     audio_path = save_data_url(payload["audio_data_url"], run_dir / "browser_audio")
-    print(f"Saved audio: {audio_path}")
-    image_path = run_dir / "host_capture.jpg"
-    CAMERAS.capture_to_file(camera_id, image_path)
-    print(f"Captured host camera {camera_id} frame: {image_path}")
-    captured_image_data_url = (
-        "data:image/jpeg;base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
-    )
+    audio_size = audio_path.stat().st_size
+    print(f"Saved audio: {audio_path} ({audio_size} bytes)")
+    if audio_size < 4096:
+        raise RuntimeError(
+            "Browser microphone upload was too small to contain usable speech "
+            f"({audio_size} bytes). Refresh the page, choose the working microphone, "
+            "and record for a few seconds while speaking clearly."
+        )
+    hardware = get_hardware_context()
+    hardware.camera.set_camera_id(camera_id)
+    print("Using shared hardware context for robot motion and wrist-camera capture.")
 
     print_step("2", "Sending audio to ElevenLabs speech-to-text")
     stt_model = load_env_value("ELEVENLABS_STT_MODEL") or "scribe_v1"
@@ -806,12 +810,17 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     transcript = str(transcript_payload.get("text") or "").strip()
     print(f"Transcript: {transcript}")
     if not transcript:
-        raise RuntimeError(f"STT returned no transcript: {transcript_payload}")
+        raise RuntimeError(
+            "STT returned no transcript. The uploaded browser audio may be silent or from "
+            f"the wrong microphone. Saved audio: {audio_path} ({audio_size} bytes). "
+            f"ElevenLabs payload: {transcript_payload}"
+        )
 
     print_step("3", "Creating Alfred runtime")
-    runtime = AlfredRuntime(settings, run_dir=run_dir)
+    runtime = AlfredRuntime(settings, run_dir=run_dir, hardware_context=hardware)
     runtime.request_id = request_id
     runtime.logger.request_id = request_id
+    runtime.orchestrator.camera_id = camera_id
     print(f"Run artifacts directory: {runtime.run_dir}")
 
     print_step("4", "Classifying intent")
@@ -826,33 +835,71 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     print_step("5", "Creating skill plan")
     plan = runtime.orchestrator.create_plan(request, intent_result)
     print(f"Goal: {plan.goal}")
-    print("  1. capture_wrist_camera_image (host)", {"image_path": str(image_path)})
-    print("  2. describe_image_with_vlm", {"image_path": str(image_path)})
+    for index, call in enumerate(plan.skill_calls, start=1):
+        print(f"  {index}. {call.skill_name} {call.arguments}")
 
-    print_step("6", "Executing VLM skill")
-    capture_result = SkillResult(
-        skill_name="capture_wrist_camera_image",
-        status="success",
-        output={"image_path": str(image_path), "camera_id": camera_id, "source": "host"},
-    )
-    vlm_result = runtime.executor.execute(
-        SkillCall(
-            skill_name="describe_image_with_vlm",
-            arguments={
-                "image_path": str(image_path),
-                "question": "What objects are visible on the desk?",
-                "user_text": transcript,
-            },
+    print_step("6", "Executing skills")
+    skill_results = []
+    outputs_by_skill: Dict[str, Dict[str, Any]] = {}
+    for call in plan.skill_calls:
+        call_arguments = dict(call.arguments)
+        if call.skill_name == "capture_wrist_camera_image":
+            call_arguments["move_to_overlook"] = True
+            call_arguments["require_robot_move"] = require_robot_move
+        resolved_call = SkillCall(
+            skill_name=call.skill_name,
+            arguments=runtime.executor._resolve_arguments(call_arguments, outputs_by_skill),
         )
-    )
-    skill_results = [capture_result, vlm_result]
-    for result in skill_results:
+        print(f"Executing skill: {resolved_call.skill_name}")
+        result = runtime.executor.execute(resolved_call)
+        skill_results.append(result)
+        outputs_by_skill[result.skill_name] = result.output
         print(f"Skill: {result.skill_name}")
         print(f"  Status: {result.status}")
         if result.error:
             print(f"  Error: {result.error}")
         if result.output:
             print(f"  Output: {result.output}")
+        if result.status == "error":
+            break
+
+    capture_result = next(
+        (result for result in skill_results if result.skill_name == "capture_wrist_camera_image"),
+        None,
+    )
+    raw_image_path = (
+        capture_result.output.get("image_path")
+        if capture_result and capture_result.status == "success"
+        else None
+    )
+    image_path = Path(str(raw_image_path)) if raw_image_path else None
+    captured_image_data_url = None
+    if image_path is not None and image_path.exists():
+        captured_image_data_url = (
+            "data:image/jpeg;base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
+        )
+    robot_move = None
+    if capture_result is not None:
+        robot_move = {
+            key: capture_result.output.get(key)
+            for key in (
+                "robot_pose_name",
+                "robot_move_attempted",
+                "robot_moved",
+                "robot_unavailable",
+                "robot_error",
+            )
+            if key in capture_result.output
+        }
+    vlm_result = next(
+        (result for result in skill_results if result.skill_name == "describe_image_with_vlm"),
+        None,
+    )
+    vlm_output = (
+        vlm_result.output
+        if vlm_result is not None and vlm_result.status == "success"
+        else None
+    )
 
     print_step("7", "Checking completion")
     completion = runtime.orchestrator.evaluate_completion(request, skill_results)
@@ -905,8 +952,12 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         "task_complete": completion.task_complete,
         "answer_text": final_response.answer_text,
         "confidence": final_response.confidence,
-        "image_path": str(image_path),
+        "image_path": str(image_path) if image_path is not None else None,
         "camera_id": camera_id,
+        "require_robot_move": require_robot_move,
+        "robot_move": robot_move,
+        "vlm_output": vlm_output,
+        "skill_results": [result.model_dump(mode="json") for result in skill_results],
         "captured_image_data_url": captured_image_data_url,
         "run_dir": str(run_dir),
         "speak": speak_requested,
@@ -955,7 +1006,12 @@ def load_env_into_process() -> None:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            os.environ[key.strip()] = value.strip().strip('"').strip("'")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if env_path.name == ".env":
+                os.environ[key] = value
+            else:
+                os.environ.setdefault(key, value)
 
 
 def print_header(title: str) -> None:
@@ -984,7 +1040,11 @@ def run_server(
     key: Optional[Path],
     open_browser: bool,
 ) -> int:
+    global _HARDWARE_CONTEXT
     load_env_into_process()
+    settings = Settings.load()
+    _HARDWARE_CONTEXT = HardwareContext.from_settings(settings)
+    _HARDWARE_CONTEXT.connect()
 
     server = ThreadingHTTPServer((host, port), BrowserDemoHandler)
     scheme = "http"
@@ -1032,6 +1092,9 @@ def run_server(
         print("\n[browser-demo] shutting down…")
     finally:
         server.server_close()
+        if _HARDWARE_CONTEXT is not None:
+            _HARDWARE_CONTEXT.close()
+            _HARDWARE_CONTEXT = None
     return 0
 
 
@@ -1135,21 +1198,21 @@ def run_terminal_only(args: argparse.Namespace) -> int:
         return 1
 
     settings = Settings.load()
-    runtime = AlfredRuntime(settings)
-    request = UserRequest(request_id=runtime.request_id, input_type="voice", raw_text=transcript)
-    runtime.logger.write_text("transcript.txt", request.raw_text)
-    runtime.logger.log("user_request", "success", output_data=request.model_dump(mode="json"))
-    intent_result = runtime.orchestrator.classify_intent(request.raw_text)
-    plan = runtime.orchestrator.create_plan(request, intent_result)
-    skill_results = runtime.executor.execute_plan(plan)
-    response = runtime.orchestrator.generate_final_answer(request, skill_results)
-    print(f"Alfred answer: {response.answer_text}")
+    with AlfredRuntime(settings) as runtime:
+        request = UserRequest(request_id=runtime.request_id, input_type="voice", raw_text=transcript)
+        runtime.logger.write_text("transcript.txt", request.raw_text)
+        runtime.logger.log("user_request", "success", output_data=request.model_dump(mode="json"))
+        intent_result = runtime.orchestrator.classify_intent(request.raw_text)
+        plan = runtime.orchestrator.create_plan(request, intent_result)
+        skill_results = runtime.executor.execute_plan(plan)
+        response = runtime.orchestrator.generate_final_answer(request, skill_results)
+        print(f"Alfred answer: {response.answer_text}")
 
-    if not args.no_speak:
-        runtime.executor.execute(
-            SkillCall(skill_name="speak", arguments={"text": response.answer_text})
-        )
-    return 0 if response.task_complete else 1
+        if not args.no_speak:
+            runtime.executor.execute(
+                SkillCall(skill_name="speak", arguments={"text": response.answer_text})
+            )
+        return 0 if response.task_complete else 1
 
 
 def list_devices() -> int:

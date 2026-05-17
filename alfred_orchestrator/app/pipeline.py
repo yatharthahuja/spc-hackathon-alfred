@@ -9,6 +9,7 @@ from app.config import Settings
 from app.execution.executor import SkillExecutor
 from app.execution.safety import SafetyGate
 from app.execution.skill_router import SkillRouter
+from app.hardware.resources import HardwareContext
 from app.logs.event_logger import EventLogger
 from app.orchestrator.orchestrator import AlfredOrchestrator
 from app.orchestrator.prompt_registry import PromptRegistry
@@ -32,13 +33,23 @@ class PipelineResult:
 
 
 class AlfredRuntime:
-    def __init__(self, settings: Settings, run_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        settings: Settings,
+        run_dir: Optional[Path] = None,
+        hardware_context: Optional[HardwareContext] = None,
+        connect_hardware: bool = True,
+    ):
         self.settings = settings
         self.request_id = str(uuid4())
         self.run_dir = run_dir or settings.new_run_dir("alfred_demo")
         self.logger = EventLogger(self.run_dir, self.request_id)
         self.catalog = SkillCatalog(settings.configs_dir / "skills.yaml")
         self.prompts = PromptRegistry(settings.configs_dir / "prompts.yaml")
+        self.hardware = hardware_context or HardwareContext.from_settings(settings)
+        self._owns_hardware = hardware_context is None
+        if connect_hardware:
+            self.hardware.connect()
         self.router = self._build_router()
         self.executor = SkillExecutor(
             router=self.router,
@@ -50,6 +61,16 @@ class AlfredRuntime:
             logger=self.logger,
             camera_id=settings.camera_id,
         )
+
+    def close(self) -> None:
+        if self._owns_hardware:
+            self.hardware.close()
+
+    def __enter__(self) -> "AlfredRuntime":
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.close()
 
     def handle_text(
         self,
@@ -117,6 +138,7 @@ class AlfredRuntime:
             CaptureWristCameraImageSkill(
                 run_dir=self.run_dir,
                 default_camera_id=self.settings.camera_id,
+                hardware_context=self.hardware,
             )
         )
         router.register(DescribeImageWithVLMSkill(self.settings, self.prompts))

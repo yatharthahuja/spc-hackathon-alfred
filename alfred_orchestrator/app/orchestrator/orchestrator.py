@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import List
 
 from app.logs.event_logger import EventLogger
@@ -25,7 +26,7 @@ class AlfredOrchestrator:
 
     def classify_intent(self, text: str) -> IntentResult:
         normalized = text.lower()
-        if "desk" in normalized or "what is on" in normalized:
+        if self._is_desk_inspection_request(normalized):
             result = IntentResult(
                 intent=Intent.DESCRIBE_DESK,
                 confidence=0.95,
@@ -44,6 +45,36 @@ class AlfredOrchestrator:
             output_data=result.model_dump(mode="json"),
         )
         return result
+
+    def _is_desk_inspection_request(self, normalized_text: str) -> bool:
+        compact = re.sub(r"\s+", " ", normalized_text).strip()
+        if not compact:
+            return False
+
+        desk_targets = ("desk", "table", "workbench", "workspace", "work surface")
+        if any(target in compact for target in desk_targets):
+            inspection_words = (
+                "what",
+                "see",
+                "look",
+                "inspect",
+                "describe",
+                "identify",
+                "objects",
+                "items",
+                "things",
+            )
+            if any(word in compact for word in inspection_words):
+                return True
+
+        direct_patterns = (
+            r"\bwhat(?:'s| is)? on (?:the |my |this |that )?(?:desk|table|workbench)\b",
+            r"\bwhat (?:can|do) you see\b",
+            r"\blook at (?:the |my )?(?:desk|table|workspace|work surface)\b",
+            r"\binspect (?:the |my )?(?:desk|table|workspace|work surface)\b",
+            r"\bdescribe (?:the |my )?(?:desk|table|workspace|work surface)\b",
+        )
+        return any(re.search(pattern, compact) for pattern in direct_patterns)
 
     def create_plan(self, request: UserRequest, intent_result: IntentResult) -> OrchestratorPlan:
         if intent_result.intent == Intent.DESCRIBE_DESK and intent_result.confidence >= 0.8:
