@@ -160,6 +160,66 @@ def test_catalog_planner_maps_pick_place_blue_marker_variants(tmp_path):
         assert [call.skill_name for call in plan.skill_calls] == ["pick_place_blue_marker"]
 
 
+def test_catalog_planner_maps_enzyme_experiment_variants(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    for text in [
+        "do enzyme experiments",
+        "do the enzyme experiment",
+        "run enzyme experiments",
+        "do the biological experiments",
+        "run the biological experiment",
+        "perform the test tube experiment",
+    ]:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == ["enzyme_experiments"]
+
+
+def test_catalog_planner_maps_compound_skill_sequences(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+
+    cases = [
+        (
+            "go overlook and go home",
+            ["go_overlook", "go_home"],
+        ),
+        (
+            "what's on my desk and go home",
+            ["answer_scene_question", "go_home"],
+        ),
+        (
+            "pick and place the marker and go home",
+            ["pick_place_blue_marker", "go_home"],
+        ),
+        (
+            "pick the sharpy then go home",
+            ["pick_place_blue_marker", "go_home"],
+        ),
+        (
+            "do enzyme experiments and go home",
+            ["enzyme_experiments", "go_home"],
+        ),
+    ]
+    for text, expected_skills in cases:
+        request = UserRequest(request_id="test-request", raw_text=text)
+        intent = orchestrator.classify_intent(request.raw_text)
+        plan = orchestrator.create_plan(request, intent)
+
+        assert plan.intent == Intent.RUN_SKILL
+        assert [call.skill_name for call in plan.skill_calls] == expected_skills
+
+    desk_request = UserRequest(request_id="test-request", raw_text="what's on my desk and go home")
+    desk_plan = orchestrator.create_plan(
+        desk_request,
+        orchestrator.classify_intent(desk_request.raw_text),
+    )
+    assert desk_plan.skill_calls[0].arguments["question"] == "what's on my desk"
+
+
 def test_catalog_planner_maps_scene_questions_to_scene_qa(tmp_path):
     orchestrator = _orchestrator_with_catalog_planner(tmp_path)
 
@@ -235,3 +295,27 @@ def test_final_answer_uses_scene_qa_answer_text(tmp_path):
 
     assert response.task_complete is True
     assert response.answer_text == "The marker appears to be blue."
+
+
+def test_final_answer_combines_multiple_success_messages(tmp_path):
+    orchestrator = _orchestrator_with_catalog_planner(tmp_path)
+    request = UserRequest(request_id="test-request", raw_text="go overlook and go home")
+
+    response = orchestrator.generate_final_answer(
+        request,
+        [
+            SkillResult(
+                skill_name="go_overlook",
+                status="success",
+                output={"message": "Moved to the overlook pose."},
+            ),
+            SkillResult(
+                skill_name="go_home",
+                status="success",
+                output={"message": "Moved to the home pose."},
+            ),
+        ],
+    )
+
+    assert response.task_complete is True
+    assert response.answer_text == "Moved to the overlook pose. Moved to the home pose."

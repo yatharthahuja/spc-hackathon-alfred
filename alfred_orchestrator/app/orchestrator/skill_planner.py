@@ -22,6 +22,17 @@ class SkillPlanChoice:
         return self.skill_name == "UNKNOWN"
 
 
+@dataclass(frozen=True)
+class SkillPlanSequence:
+    choices: list[SkillPlanChoice]
+    confidence: float
+    reason: str
+
+    @property
+    def is_unknown(self) -> bool:
+        return not self.choices or all(choice.is_unknown for choice in self.choices)
+
+
 class CatalogSkillPlanner:
     def __init__(
         self,
@@ -34,38 +45,9 @@ class CatalogSkillPlanner:
         self.prompt_registry = prompt_registry
 
     def choose_skill(self, user_text: str) -> SkillPlanChoice:
-        deterministic = self._deterministic_choice(user_text)
-        if deterministic is not None:
-            print("[planner] Deterministic skill selection")
-            print(f"[planner] User text: {user_text}")
-            print(f"[planner] Selected skill: {deterministic.skill_name}")
-            print(f"[planner] Arguments: {deterministic.arguments}")
-            print(f"[planner] Confidence: {deterministic.confidence}")
-            print(f"[planner] Reason: {deterministic.reason}")
-            return deterministic
-
-        llm_choice = self._choose_with_llm(user_text)
-        if llm_choice is not None:
-            if not llm_choice.is_unknown:
-                print("[planner] LLM skill selection")
-                print(f"[planner] User text: {user_text}")
-                print(f"[planner] Selected skill: {llm_choice.skill_name}")
-                print(f"[planner] Arguments: {llm_choice.arguments}")
-                print(f"[planner] Confidence: {llm_choice.confidence}")
-                print(f"[planner] Reason: {llm_choice.reason}")
-                return llm_choice
-            print("[planner] LLM returned UNKNOWN; trying conversation fallback")
-            print(f"[planner] Reason: {llm_choice.reason}")
-
-        conversation_choice = self._conversation_choice(user_text)
-        if conversation_choice is not None:
-            print("[planner] Falling back to general conversation")
-            print(f"[planner] User text: {user_text}")
-            print(f"[planner] Selected skill: {conversation_choice.skill_name}")
-            return conversation_choice
-
-        print("[planner] No skill matched")
-        print(f"[planner] User text: {user_text}")
+        sequence = self.choose_skills(user_text)
+        if sequence.choices:
+            return sequence.choices[0]
         return SkillPlanChoice(
             skill_name="UNKNOWN",
             arguments={},
@@ -73,7 +55,54 @@ class CatalogSkillPlanner:
             reason="No enabled skill matched the request.",
         )
 
-    def _choose_with_llm(self, user_text: str) -> SkillPlanChoice | None:
+    def choose_skills(self, user_text: str) -> SkillPlanSequence:
+        deterministic = self._deterministic_sequence(user_text)
+        if deterministic is not None:
+            print("[planner] Deterministic skill sequence selection")
+            print(f"[planner] User text: {user_text}")
+            self._print_sequence(deterministic.choices)
+            print(f"[planner] Sequence confidence: {deterministic.confidence}")
+            print(f"[planner] Sequence reason: {deterministic.reason}")
+            return deterministic
+
+        llm_sequence = self._choose_sequence_with_llm(user_text)
+        if llm_sequence is not None:
+            if not llm_sequence.is_unknown:
+                print("[planner] LLM skill sequence selection")
+                print(f"[planner] User text: {user_text}")
+                self._print_sequence(llm_sequence.choices)
+                print(f"[planner] Sequence confidence: {llm_sequence.confidence}")
+                print(f"[planner] Sequence reason: {llm_sequence.reason}")
+                return llm_sequence
+            print("[planner] LLM returned UNKNOWN; trying conversation fallback")
+            print(f"[planner] Reason: {llm_sequence.reason}")
+
+        conversation_choice = self._conversation_choice(user_text)
+        if conversation_choice is not None:
+            print("[planner] Falling back to general conversation")
+            print(f"[planner] User text: {user_text}")
+            print(f"[planner] Selected skill: {conversation_choice.skill_name}")
+            return SkillPlanSequence(
+                choices=[conversation_choice],
+                confidence=conversation_choice.confidence,
+                reason=conversation_choice.reason,
+            )
+
+        print("[planner] No skill matched")
+        print(f"[planner] User text: {user_text}")
+        unknown = SkillPlanChoice(
+            skill_name="UNKNOWN",
+            arguments={},
+            confidence=0.2,
+            reason="No enabled skill matched the request.",
+        )
+        return SkillPlanSequence(
+            choices=[unknown],
+            confidence=unknown.confidence,
+            reason=unknown.reason,
+        )
+
+    def _choose_sequence_with_llm(self, user_text: str) -> SkillPlanSequence | None:
         if not self.settings.openai_api_key:
             return None
 
@@ -98,10 +127,46 @@ class CatalogSkillPlanner:
             print("[planner] LLM raw output:")
             print(raw_text)
             parsed = extract_json_object(raw_text)
-            return self._validate_choice(parsed)
+            return self._validate_sequence(parsed)
         except Exception as exc:
             print(f"[planner] LLM skill selection failed: {exc}")
             return None
+
+    def _validate_sequence(self, raw_plan: dict[str, Any]) -> SkillPlanSequence:
+        raw_skill_calls = raw_plan.get("skill_calls")
+        if not isinstance(raw_skill_calls, list):
+            choice = self._validate_choice(raw_plan)
+            return SkillPlanSequence(
+                choices=[choice],
+                confidence=choice.confidence,
+                reason=choice.reason,
+            )
+
+        choices = [
+            self._validate_choice(raw_choice)
+            for raw_choice in raw_skill_calls
+            if isinstance(raw_choice, dict)
+        ]
+        choices = [choice for choice in choices if not choice.is_unknown]
+        if not choices:
+            unknown = SkillPlanChoice(
+                skill_name="UNKNOWN",
+                arguments={},
+                confidence=self._confidence(raw_plan.get("confidence", 0.0)),
+                reason=str(raw_plan.get("reason", "")).strip(),
+            )
+            return SkillPlanSequence(
+                choices=[unknown],
+                confidence=unknown.confidence,
+                reason=unknown.reason,
+            )
+
+        return SkillPlanSequence(
+            choices=choices,
+            confidence=min(choice.confidence for choice in choices),
+            reason=str(raw_plan.get("reason", "")).strip()
+            or "; ".join(choice.reason for choice in choices if choice.reason),
+        )
 
     def _validate_choice(self, raw_choice: dict[str, Any]) -> SkillPlanChoice:
         skill_name = str(raw_choice.get("skill_name", "")).strip()
@@ -155,6 +220,69 @@ class CatalogSkillPlanner:
             )
         return skills
 
+    def _deterministic_sequence(self, user_text: str) -> SkillPlanSequence | None:
+        clauses = self._split_compound_requests(user_text)
+        if len(clauses) <= 1:
+            choice = self._deterministic_choice(user_text)
+            if choice is None:
+                return None
+            return SkillPlanSequence(
+                choices=[choice],
+                confidence=choice.confidence,
+                reason=choice.reason,
+            )
+
+        choices = []
+        for clause in clauses:
+            choice = self._deterministic_choice(clause)
+            if choice is None or choice.is_unknown:
+                return None
+            choices.append(choice)
+
+        return SkillPlanSequence(
+            choices=choices,
+            confidence=min(choice.confidence for choice in choices),
+            reason="Detected an ordered compound request with multiple supported skills.",
+        )
+
+    @staticmethod
+    def _split_compound_requests(user_text: str) -> list[str]:
+        protected = re.sub(
+            r"\bpick\s+and\s+place\b",
+            "pick__and__place",
+            user_text,
+            flags=re.IGNORECASE,
+        )
+        protected = re.sub(
+            r"\bpick\s+up\s+and\s+drop\b",
+            "pick__up__and__drop",
+            protected,
+            flags=re.IGNORECASE,
+        )
+        protected = re.sub(
+            r"\bpick\s+and\s+drop\b",
+            "pick__and__drop",
+            protected,
+            flags=re.IGNORECASE,
+        )
+        protected = re.sub(r"\band\s+then\b", " then ", protected, flags=re.IGNORECASE)
+        raw_parts = re.split(
+            r"\s*(?:,|;|\bthen\b|\bafter that\b)\s*|\s+and\s+",
+            protected,
+            flags=re.IGNORECASE,
+        )
+        restored_parts = []
+        for part in raw_parts:
+            restored = (
+                part.replace("pick__and__place", "pick and place")
+                .replace("pick__up__and__drop", "pick up and drop")
+                .replace("pick__and__drop", "pick and drop")
+                .strip()
+            )
+            if restored:
+                restored_parts.append(restored)
+        return restored_parts
+
     def _deterministic_choice(self, user_text: str) -> SkillPlanChoice | None:
         normalized = " ".join(user_text.lower().split())
         history_choice = self._deterministic_history_choice(user_text, normalized)
@@ -168,6 +296,10 @@ class CatalogSkillPlanner:
         read_notes_choice = self._deterministic_read_notes_choice(user_text, normalized)
         if read_notes_choice is not None:
             return read_notes_choice
+
+        enzyme_choice = self._deterministic_enzyme_experiment_choice(normalized)
+        if enzyme_choice is not None:
+            return enzyme_choice
 
         cleanup_choice = self._deterministic_table_cleanup_choice(normalized)
         if cleanup_choice is not None:
@@ -228,6 +360,24 @@ class CatalogSkillPlanner:
             )
         return None
 
+    def _deterministic_enzyme_experiment_choice(self, normalized: str) -> SkillPlanChoice | None:
+        experiment_words = ("experiment", "experiments", "lab", "protocol")
+        domain_words = ("enzyme", "biological", "biology", "bio", "test tube", "tube")
+        action_words = ("do", "run", "perform", "start", "execute", "begin")
+        if (
+            any(word in normalized for word in experiment_words)
+            and any(word in normalized for word in domain_words)
+            and any(word in normalized for word in action_words)
+            and self._can_use("enzyme_experiments")
+        ):
+            return SkillPlanChoice(
+                skill_name="enzyme_experiments",
+                arguments={},
+                confidence=0.95,
+                reason="Detected a request to run the scripted enzyme or biological experiment trajectory.",
+            )
+        return None
+
     def _conversation_choice(self, user_text: str) -> SkillPlanChoice | None:
         if not self._can_use("general_conversation"):
             return None
@@ -243,7 +393,16 @@ class CatalogSkillPlanner:
         user_text: str,
         normalized: str,
     ) -> SkillPlanChoice | None:
-        question_starters = ("what", "which", "how many", "is there", "are there", "do you see")
+        question_starters = (
+            "what",
+            "what's",
+            "whats",
+            "which",
+            "how many",
+            "is there",
+            "are there",
+            "do you see",
+        )
         visual_words = (
             "color",
             "colour",
@@ -365,6 +524,14 @@ class CatalogSkillPlanner:
             skill_name in self.skill_catalog.list_skills()
             and self.skill_catalog.is_enabled(skill_name)
         )
+
+    @staticmethod
+    def _print_sequence(choices: list[SkillPlanChoice]) -> None:
+        for index, choice in enumerate(choices, start=1):
+            print(f"[planner] Step {index} skill: {choice.skill_name}")
+            print(f"[planner] Step {index} arguments: {choice.arguments}")
+            print(f"[planner] Step {index} confidence: {choice.confidence}")
+            print(f"[planner] Step {index} reason: {choice.reason}")
 
     @staticmethod
     def _confidence(value: Any) -> float:

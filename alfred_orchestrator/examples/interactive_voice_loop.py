@@ -53,6 +53,16 @@ from test_elevenlabs_api import load_env_value, synthesize_speech, transcribe_au
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+IMAGE_CAPTURE_SKILLS = {
+    "capture_wrist_camera_image",
+    "answer_scene_question",
+    "read_notes",
+}
+IMAGE_VLM_SKILLS = {
+    "describe_image_with_vlm",
+    "answer_scene_question",
+    "read_notes",
+}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -427,6 +437,9 @@ HTML = r"""<!doctype html>
           log("Task complete: " + payload.task_complete);
           log("Alfred: " + payload.answer_text);
           log("Run artifacts: " + payload.run_dir);
+          if (payload.image_skill_name) {
+            log("Captured image source skill: " + payload.image_skill_name);
+          }
           if (payload.robot_move) {
             log("Robot move: " + JSON.stringify(payload.robot_move, null, 2));
           }
@@ -435,6 +448,8 @@ HTML = r"""<!doctype html>
           }
           if (payload.captured_image_data_url) {
             capturedImage.src = payload.captured_image_data_url;
+          } else {
+            capturedImage.removeAttribute("src");
           }
           if (payload.tts_audio_url) {
             // Cache-bust so the <audio> always refetches a fresh response.
@@ -856,6 +871,8 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
     outputs_by_skill: Dict[str, Dict[str, Any]] = {}
     for call in plan.skill_calls:
         call_arguments = dict(call.arguments)
+        if call.skill_name in IMAGE_CAPTURE_SKILLS:
+            call_arguments.setdefault("camera_id", camera_id)
         if call.skill_name == "capture_wrist_camera_image":
             call_arguments["move_to_overlook"] = True
             call_arguments["require_robot_move"] = require_robot_move
@@ -877,38 +894,32 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         if result.status == "error":
             break
 
-    capture_result = next(
-        (result for result in skill_results if result.skill_name == "capture_wrist_camera_image"),
-        None,
-    )
+    image_result = latest_successful_image_result(skill_results)
     raw_image_path = (
-        capture_result.output.get("image_path")
-        if capture_result and capture_result.status == "success"
+        image_result.output.get("image_path")
+        if image_result and image_result.status == "success"
         else None
     )
     image_path = Path(str(raw_image_path)) if raw_image_path else None
-    captured_image_data_url = None
-    if image_path is not None and image_path.exists():
-        captured_image_data_url = (
-            "data:image/jpeg;base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
-        )
-    robot_move = None
-    if capture_result is not None:
-        robot_move = {
-            key: capture_result.output.get(key)
-            for key in (
-                "robot_pose_name",
-                "robot_move_attempted",
-                "robot_moved",
-                "robot_unavailable",
-                "robot_error",
-            )
-            if key in capture_result.output
-        }
-    vlm_result = next(
-        (result for result in skill_results if result.skill_name == "describe_image_with_vlm"),
+    captured_image_data_url = image_data_url(image_path)
+    image_skill_name = image_result.skill_name if image_result is not None else None
+    if image_path is not None:
+        print(f"Latest image for web UI came from skill: {image_skill_name}")
+        print(f"Latest image path for web UI: {image_path}")
+        print(f"Latest image data URL present: {captured_image_data_url is not None}")
+
+    robot_result = next(
+        (
+            result
+            for result in reversed(skill_results)
+            if any(key in result.output for key in ("robot_pose_name", "robot_move_attempted"))
+        ),
         None,
     )
+    robot_move = None
+    if robot_result is not None:
+        robot_move = robot_move_payload(robot_result.output)
+    vlm_result = latest_successful_vlm_result(skill_results)
     vlm_output = (
         vlm_result.output
         if vlm_result is not None and vlm_result.status == "success"
@@ -974,6 +985,7 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         "answer_text": final_response.answer_text,
         "confidence": final_response.confidence,
         "image_path": str(image_path) if image_path is not None else None,
+        "image_skill_name": image_skill_name,
         "camera_id": camera_id,
         "require_robot_move": require_robot_move,
         "robot_move": robot_move,
@@ -986,6 +998,51 @@ def process_request(payload: Dict[str, Any]) -> Dict[str, Any]:
         "tts_audio_bytes": tts_audio_bytes,
         "tts_error": tts_error,
     }
+
+
+def latest_successful_image_result(skill_results: List[Any]) -> Optional[Any]:
+    return next(
+        (
+            result
+            for result in reversed(skill_results)
+            if result.status == "success" and result.output.get("image_path")
+        ),
+        None,
+    )
+
+
+def latest_successful_vlm_result(skill_results: List[Any]) -> Optional[Any]:
+    return next(
+        (
+            result
+            for result in reversed(skill_results)
+            if result.status == "success"
+            and result.skill_name in IMAGE_VLM_SKILLS
+        ),
+        None,
+    )
+
+
+def robot_move_payload(output: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: output.get(key)
+        for key in (
+            "robot_pose_name",
+            "robot_move_attempted",
+            "robot_moved",
+            "robot_unavailable",
+            "robot_error",
+        )
+        if key in output
+    }
+
+
+def image_data_url(image_path: Optional[Path]) -> Optional[str]:
+    if image_path is not None and image_path.exists():
+        return (
+            "data:image/jpeg;base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
+        )
+    return None
 
 
 def save_data_url(data_url: str, path_without_suffix: Path) -> Path:

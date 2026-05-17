@@ -29,7 +29,13 @@ from app.skills.camera import CaptureWristCameraImageSkill
 from app.skills.arm_motion import MoveArmNoopSkill
 from app.skills.conversation import GeneralConversationSkill
 from app.skills.listen import ListenSkill
-from app.skills.marker import GoHomeSkill, GoOverlookSkill, PickBlueMarkerSkill, PickPlaceBlueMarkerSkill
+from app.skills.marker import (
+    EnzymeExperimentsSkill,
+    GoHomeSkill,
+    GoOverlookSkill,
+    PickBlueMarkerSkill,
+    PickPlaceBlueMarkerSkill,
+)
 from app.skills.read_notes import ReadNotesSkill
 from app.skills.scene_qa import AnswerSceneQuestionSkill
 from app.skills.speech_to_text import SpeechToTextSkill
@@ -204,6 +210,7 @@ class AlfredRuntime:
         router.register(GoOverlookSkill(self.hardware))
         router.register(PickBlueMarkerSkill(self.hardware))
         router.register(PickPlaceBlueMarkerSkill(self.hardware))
+        router.register(EnzymeExperimentsSkill(self.hardware))
         router.register(
             ReadNotesSkill(
                 self.settings,

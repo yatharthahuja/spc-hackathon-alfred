@@ -131,6 +131,21 @@ skills:
       - clean up the table
     enabled: true
 
+  enzyme_experiments:
+    type: physical
+    description: Run the full scripted enzyme or biological experiment trajectory using the test-tube grasp, pour, drop, and home poses.
+    inputs: []
+    outputs: [trajectory_names, robot_move_attempted, robot_moved, message]
+    trajectory_names: [test_tube_pre_grasp, test_tube_grasp, test_tube_pick_pose, test_tube_pick_pose_2, test_tube_pre_pour, test_tube_mid_pour, test_tube_about_to_pour, test_tube_pour, test_tube_pour_continued, test_tube_pour_complete, test_tube_post_pour, test_tube_post_post_pour, test_tube_pre_drop, test_tube_about_to_drop, test_tube_drop, test_tube_finish, test_tube_pour_home]
+    examples:
+      - do enzyme experiments
+      - do the enzyme experiment
+      - run enzyme experiments
+      - do the biological experiments
+      - run the biological experiment
+      - perform the test tube experiment
+    enabled: true
+
   answer_scene_question:
     type: vision
     description: Move to the overlook pose, capture a wrist-camera image, and answer a user question about the visible scene.

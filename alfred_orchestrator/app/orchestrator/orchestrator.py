@@ -15,7 +15,7 @@ from app.orchestrator.schemas import (
     TaskStep,
     UserRequest,
 )
-from app.orchestrator.skill_planner import CatalogSkillPlanner, SkillPlanChoice
+from app.orchestrator.skill_planner import CatalogSkillPlanner, SkillPlanChoice, SkillPlanSequence
 from app.orchestrator.task_registry import SkillCatalog
 
 
@@ -85,7 +85,12 @@ class AlfredOrchestrator:
         return any(re.search(pattern, compact) for pattern in direct_patterns)
 
     def create_plan(self, request: UserRequest, intent_result: IntentResult) -> OrchestratorPlan:
-        if intent_result.intent == Intent.DESCRIBE_DESK and intent_result.confidence >= 0.8:
+        use_catalog_planner = self.skill_planner is not None and (
+            intent_result.intent != Intent.DESCRIBE_DESK
+            or intent_result.confidence < 0.8
+            or self._is_compound_request(request.raw_text)
+        )
+        if intent_result.intent == Intent.DESCRIBE_DESK and intent_result.confidence >= 0.8 and not use_catalog_planner:
             plan = OrchestratorPlan(
                 goal="Describe what is on the user's desk",
                 intent=Intent.DESCRIBE_DESK,
@@ -120,8 +125,8 @@ class AlfredOrchestrator:
                 ],
             )
         elif self.skill_planner is not None:
-            choice = self.skill_planner.choose_skill(request.raw_text)
-            plan = self._plan_from_skill_choice(request, choice)
+            sequence = self.skill_planner.choose_skills(request.raw_text)
+            plan = self._plan_from_skill_sequence(request, sequence)
         else:
             plan = OrchestratorPlan(
                 goal="Ask user for a supported request",
@@ -143,23 +148,61 @@ class AlfredOrchestrator:
         )
         return plan
 
+    @staticmethod
+    def _is_compound_request(text: str) -> bool:
+        protected = re.sub(r"\bpick\s+and\s+place\b", "pick__and__place", text, flags=re.IGNORECASE)
+        protected = re.sub(
+            r"\bpick\s+up\s+and\s+drop\b",
+            "pick__up__and__drop",
+            protected,
+            flags=re.IGNORECASE,
+        )
+        protected = re.sub(r"\bpick\s+and\s+drop\b", "pick__and__drop", protected, flags=re.IGNORECASE)
+        return bool(re.search(r"\b(?:and then|then|after that)\b|[,;]|\s+and\s+", protected, re.IGNORECASE))
+
     def _plan_from_skill_choice(
         self,
         request: UserRequest,
         choice: SkillPlanChoice,
     ) -> OrchestratorPlan:
+        return self._plan_from_skill_sequence(
+            request,
+            SkillPlanSequence(
+                choices=[choice],
+                confidence=choice.confidence,
+                reason=choice.reason,
+            ),
+        )
+
+    def _plan_from_skill_sequence(
+        self,
+        request: UserRequest,
+        sequence: SkillPlanSequence,
+    ) -> OrchestratorPlan:
+        choices = [
+            choice
+            for choice in sequence.choices
+            if not choice.is_unknown and choice.confidence >= 0.5
+        ]
         self.logger.log(
             stage="skill_planning",
-            status="success" if not choice.is_unknown else "info",
+            status="success" if choices else "info",
             input_data={"text": request.raw_text},
             output_data={
-                "skill_name": choice.skill_name,
-                "arguments": choice.arguments,
-                "confidence": choice.confidence,
-                "reason": choice.reason,
+                "skill_calls": [
+                    {
+                        "skill_name": choice.skill_name,
+                        "arguments": choice.arguments,
+                        "confidence": choice.confidence,
+                        "reason": choice.reason,
+                    }
+                    for choice in sequence.choices
+                ],
+                "confidence": sequence.confidence,
+                "reason": sequence.reason,
             },
         )
-        if choice.is_unknown or choice.confidence < 0.5:
+        if not choices:
             return OrchestratorPlan(
                 goal="Ask user for a supported request",
                 intent=Intent.UNKNOWN,
@@ -175,7 +218,7 @@ class AlfredOrchestrator:
                 TaskStep(
                     task_id="t1",
                     agent="catalog_skill_planner",
-                    required_skills=[choice.skill_name],
+                    required_skills=[choice.skill_name for choice in choices],
                 )
             ],
             skill_calls=[
@@ -183,6 +226,7 @@ class AlfredOrchestrator:
                     skill_name=choice.skill_name,
                     arguments=choice.arguments,
                 )
+                for choice in choices
             ],
             completion_criteria=["Selected skill completed successfully"],
         )
@@ -230,20 +274,22 @@ class AlfredOrchestrator:
                     confidence=0.3,
                 )
             else:
-                successful_result = next(
-                    (result for result in results if result.status == "success"),
-                    None,
-                )
-                message = ""
-                if successful_result:
-                    message = str(
-                        successful_result.output.get("answer_text")
-                        or successful_result.output.get("message")
+                successful_results = [
+                    result for result in results if result.status == "success"
+                ]
+                messages = [
+                    str(
+                        result.output.get("answer_text")
+                        or result.output.get("message")
                         or ""
                     ).strip()
+                    for result in successful_results
+                ]
+                messages = [message for message in messages if message]
+                successful_result = successful_results[0] if successful_results else None
                 response = FinalResponse(
                     task_complete=successful_result is not None,
-                    answer_text=message or "Done.",
+                    answer_text=" ".join(messages) if messages else "Done.",
                     confidence=0.9 if successful_result else 0.3,
                 )
 

@@ -59,6 +59,7 @@ def test_runtime_borrows_shared_hardware_context(tmp_path):
     assert "go_overlook" in runtime.router.names()
     assert "pick_blue_marker" in runtime.router.names()
     assert "pick_place_blue_marker" in runtime.router.names()
+    assert "enzyme_experiments" in runtime.router.names()
     assert "answer_scene_question" in runtime.router.names()
     assert "read_notes" in runtime.router.names()
 

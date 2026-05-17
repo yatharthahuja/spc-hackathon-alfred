@@ -183,7 +183,26 @@ def main() -> int:
             f"Use --list to see what's available in {args.file}.",
             file=sys.stderr,
         )
-        args.names = ["pre_pick_marker", "pick_marker", "post_pick_marker", "pre_place", "drop_marker"]
+        # args.names = ["pre_pick_marker", "pick_marker", "post_pick_marker", "pre_place", "drop_marker"]
+        args.names = [
+            "test_tube_pre_grasp",
+            "test_tube_grasp",
+            "test_tube_pick_pose",
+            "test_tube_pick_pose_2",
+            "test_tube_pre_pour",
+            "test_tube_mid_pour",
+            "test_tube_about_to_pour",
+            "test_tube_pour",
+            "test_tube_pour_continued",
+            "test_tube_pour_complete",
+            "test_tube_post_pour",
+            "test_tube_post_post_pour",
+            "test_tube_pre_drop",
+            "test_tube_about_to_drop",
+            "test_tube_drop",
+            "test_tube_finish",
+            "test_tube_pour_home",
+        ]
 
         # args.names = ["pre_pick_marker", "pick_marker", "post_pick_marker"]
 

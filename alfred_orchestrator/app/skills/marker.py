@@ -21,6 +21,25 @@ PICK_PLACE_BLUE_MARKER_SEQUENCE = [
 ]
 GO_HOME_SEQUENCE = ["go_home"]
 GO_OVERLOOK_SEQUENCE = ["overlook"]
+ENZYME_EXPERIMENTS_SEQUENCE = [
+    "test_tube_pre_grasp",
+    "test_tube_grasp",
+    "test_tube_pick_pose",
+    "test_tube_pick_pose_2",
+    "test_tube_pre_pour",
+    "test_tube_mid_pour",
+    "test_tube_about_to_pour",
+    "test_tube_pour",
+    "test_tube_pour_continued",
+    "test_tube_pour_complete",
+    "test_tube_post_pour",
+    "test_tube_post_post_pour",
+    "test_tube_pre_drop",
+    "test_tube_about_to_drop",
+    "test_tube_drop",
+    "test_tube_finish",
+    "test_tube_pour_home",
+]
 
 
 class RobotTrajectorySkill(Skill):
@@ -71,3 +90,9 @@ class GoOverlookSkill(RobotTrajectorySkill):
     name = "go_overlook"
     trajectory_names = GO_OVERLOOK_SEQUENCE
     success_message = "Moved to the overlook pose."
+
+
+class EnzymeExperimentsSkill(RobotTrajectorySkill):
+    name = "enzyme_experiments"
+    trajectory_names = ENZYME_EXPERIMENTS_SEQUENCE
+    success_message = "Completed the enzyme experiment trajectory."

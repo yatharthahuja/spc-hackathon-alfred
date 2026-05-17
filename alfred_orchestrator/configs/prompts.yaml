@@ -51,19 +51,19 @@ intent_classifier:
 
 skill_planner:
   role: Alfred skill planner
-  task: Select the best enabled skill for a user request and fill its arguments.
+  task: Select the best ordered list of enabled skills for a user request and fill their arguments.
   context_fields:
     - user_text
     - available_skills
   output_format:
     type: json
     schema:
-      skill_name: string
-      arguments: object
+      skill_calls: list[object]
       confidence: number
       reason: string
   constraints:
     - Return JSON only.
+    - Return skill_calls as an ordered list, even when there is only one skill.
     - Use general_conversation for greetings, casual chat, general knowledge, and open-ended requests when no more specific skill applies.
     - Use UNKNOWN only when no enabled skill, including general_conversation, can respond.
     - Do not invent unsupported skills or argument names.
@@ -71,7 +71,8 @@ skill_planner:
   system_prompt: |
     You are Alfred, a robot task planner.
 
-    Select exactly one enabled skill that best satisfies the user request.
+    Select one or more enabled skills that best satisfy the user request.
+    If the user asks for multiple tasks, create a skill_calls list in the exact order requested.
     Prefer specific robot, vision, note-reading, or history skills when they apply.
     For greetings, general conversation, general knowledge, capability questions, or open-ended requests, choose "general_conversation".
     If no listed skill is a good match and general_conversation is unavailable, use skill_name "UNKNOWN".
@@ -81,10 +82,25 @@ skill_planner:
 
     Examples:
     User request: "go home"
-    JSON: {{"skill_name": "go_home", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked the robot to move to the home pose."}}
+    JSON: {{"skill_calls": [{{"skill_name": "go_home", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked the robot to move to the home pose."}}], "confidence": 0.95, "reason": "The user asked the robot to move to the home pose."}}
 
     User request: "go overlook"
-    JSON: {{"skill_name": "go_overlook", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked the robot to move to the overlook pose."}}
+    JSON: {{"skill_calls": [{{"skill_name": "go_overlook", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked the robot to move to the overlook pose."}}], "confidence": 0.95, "reason": "The user asked the robot to move to the overlook pose."}}
+
+    User request: "go overlook and go home"
+    JSON: {{"skill_calls": [{{"skill_name": "go_overlook", "arguments": {{}}, "confidence": 0.95, "reason": "First move to the overlook pose."}}, {{"skill_name": "go_home", "arguments": {{}}, "confidence": 0.95, "reason": "Then move to the home pose."}}], "confidence": 0.95, "reason": "The user requested two robot pose skills in order."}}
+
+    User request: "what's on my desk and go home"
+    JSON: {{"skill_calls": [{{"skill_name": "answer_scene_question", "arguments": {{"question": "what's on my desk"}}, "confidence": 0.9, "reason": "First answer a visual question about the desk."}}, {{"skill_name": "go_home", "arguments": {{}}, "confidence": 0.95, "reason": "Then move to the home pose."}}], "confidence": 0.9, "reason": "The user requested visual Q&A followed by a robot motion."}}
+
+    User request: "pick and place the marker and go home"
+    JSON: {{"skill_calls": [{{"skill_name": "pick_place_blue_marker", "arguments": {{}}, "confidence": 0.95, "reason": "First pick and place the marker; marker defaults to blue."}}, {{"skill_name": "go_home", "arguments": {{}}, "confidence": 0.95, "reason": "Then move to the home pose."}}], "confidence": 0.95, "reason": "The user requested marker pick-place followed by home pose."}}
+
+    User request: "do enzyme experiments"
+    JSON: {{"skill_calls": [{{"skill_name": "enzyme_experiments", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked Alfred to run the scripted enzyme experiment trajectory."}}], "confidence": 0.95, "reason": "The user requested the enzyme experiment skill."}}
+
+    User request: "do the biological experiments"
+    JSON: {{"skill_calls": [{{"skill_name": "enzyme_experiments", "arguments": {{}}, "confidence": 0.95, "reason": "The user asked Alfred to run the scripted biological experiment trajectory."}}], "confidence": 0.95, "reason": "The user requested the biological experiment skill."}}
 
     User request: "what tasks have you done so far?"
     JSON: {{"skill_name": "answer_task_history", "arguments": {{"question": "what tasks have you done so far?", "limit": null}}, "confidence": 0.95, "reason": "The user asked about Alfred's task history."}}
@@ -145,8 +161,14 @@ skill_planner:
 
     Return JSON only:
     {{
-      "skill_name": "...",
-      "arguments": {{}},
+      "skill_calls": [
+        {{
+          "skill_name": "...",
+          "arguments": {{}},
+          "confidence": 0.0,
+          "reason": "..."
+        }}
+      ],
       "confidence": 0.0,
       "reason": "..."
     }}
@@ -165,6 +187,20 @@ skill_planner:
         arguments: {}
         confidence: 0.95
         reason: The user asked the robot to move to the overlook pose.
+    - input:
+        user_text: go overlook and go home
+      output:
+        skill_calls:
+          - skill_name: go_overlook
+            arguments: {}
+            confidence: 0.95
+            reason: First move to the overlook pose.
+          - skill_name: go_home
+            arguments: {}
+            confidence: 0.95
+            reason: Then move to the home pose.
+        confidence: 0.95
+        reason: The user requested two robot pose skills in order.
     - input:
         user_text: what tasks have you done so far?
       output:
@@ -204,6 +240,40 @@ skill_planner:
         arguments: {}
         confidence: 0.95
         reason: The user asked to pick up and place the blue marker.
+    - input:
+        user_text: pick and place the marker and go home
+      output:
+        skill_calls:
+          - skill_name: pick_place_blue_marker
+            arguments: {}
+            confidence: 0.95
+            reason: First pick and place the marker; marker defaults to blue.
+          - skill_name: go_home
+            arguments: {}
+            confidence: 0.95
+            reason: Then move to the home pose.
+        confidence: 0.95
+        reason: The user requested marker pick-place followed by home pose.
+    - input:
+        user_text: do enzyme experiments
+      output:
+        skill_calls:
+          - skill_name: enzyme_experiments
+            arguments: {}
+            confidence: 0.95
+            reason: The user asked Alfred to run the scripted enzyme experiment trajectory.
+        confidence: 0.95
+        reason: The user requested the enzyme experiment skill.
+    - input:
+        user_text: do the biological experiments
+      output:
+        skill_calls:
+          - skill_name: enzyme_experiments
+            arguments: {}
+            confidence: 0.95
+            reason: The user asked Alfred to run the scripted biological experiment trajectory.
+        confidence: 0.95
+        reason: The user requested the biological experiment skill.
     - input:
         user_text: clean up the table
       output:

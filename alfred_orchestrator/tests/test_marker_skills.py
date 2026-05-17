@@ -6,10 +6,12 @@ from app.config import Settings
 from app.hardware.resources import RobotSequenceResult
 from app.orchestrator.task_registry import SkillCatalog
 from app.skills.marker import (
+    ENZYME_EXPERIMENTS_SEQUENCE,
     GO_HOME_SEQUENCE,
     GO_OVERLOOK_SEQUENCE,
     PICK_BLUE_MARKER_SEQUENCE,
     PICK_PLACE_BLUE_MARKER_SEQUENCE,
+    EnzymeExperimentsSkill,
     GoHomeSkill,
     GoOverlookSkill,
     PickBlueMarkerSkill,
@@ -57,6 +59,7 @@ def test_marker_skills_are_declared_in_catalog():
     assert catalog.get("go_overlook")["trajectory_names"] == GO_OVERLOOK_SEQUENCE
     assert catalog.get("pick_blue_marker")["trajectory_names"] == PICK_BLUE_MARKER_SEQUENCE
     assert catalog.get("pick_place_blue_marker")["trajectory_names"] == PICK_PLACE_BLUE_MARKER_SEQUENCE
+    assert catalog.get("enzyme_experiments")["trajectory_names"] == ENZYME_EXPERIMENTS_SEQUENCE
     assert catalog.get("answer_scene_question")["inputs"] == ["question"]
     assert catalog.get("read_notes")["inputs"] == ["user_text"]
 
@@ -95,3 +98,15 @@ def test_go_overlook_runs_overlook_sequence():
     assert hardware.robot.sequences == [GO_OVERLOOK_SEQUENCE]
     assert result.output["trajectory_names"] == GO_OVERLOOK_SEQUENCE
     assert result.output["message"] == "Moved to the overlook pose."
+
+
+def test_enzyme_experiments_runs_full_experiment_sequence():
+    hardware = FakeHardwareContext()
+    skill = EnzymeExperimentsSkill(hardware)
+
+    result = skill.run()
+
+    assert result.status == "success"
+    assert hardware.robot.sequences == [ENZYME_EXPERIMENTS_SEQUENCE]
+    assert result.output["trajectory_names"] == ENZYME_EXPERIMENTS_SEQUENCE
+    assert result.output["message"] == "Completed the enzyme experiment trajectory."
